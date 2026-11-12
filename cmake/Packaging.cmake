@@ -17,11 +17,55 @@ set(CPACK_STRIP_FILES ON)
 
 if(WIN32)
     # Copia as DLLs do Qt e os plugins necessários (windeployqt) na instalação.
-    qt_generate_deploy_app_script(
-        TARGET loudmixer
-        FILENAME_VARIABLE loudmixer_deploy_script
-        NO_UNSUPPORTED_PLATFORM_ERROR)
+    # FILENAME_VARIABLE foi trocado por OUTPUT_SCRIPT no Qt 6.5 e removido depois.
+    if(Qt6_VERSION VERSION_GREATER_EQUAL 6.5)
+        qt_generate_deploy_app_script(
+            TARGET loudmixer
+            OUTPUT_SCRIPT loudmixer_deploy_script
+            NO_UNSUPPORTED_PLATFORM_ERROR)
+    else()
+        qt_generate_deploy_app_script(
+            TARGET loudmixer
+            FILENAME_VARIABLE loudmixer_deploy_script
+            NO_UNSUPPORTED_PLATFORM_ERROR)
+    endif()
     install(SCRIPT ${loudmixer_deploy_script})
+
+    if(MINGW)
+        # O windeployqt copia o Qt e o runtime do GCC, mas não as outras DLLs de
+        # que o Qt do MSYS2 depende (ICU, zstd, harfbuzz, freetype...). Sem isto
+        # o instalador só funcionaria em máquinas com o MSYS2 no PATH.
+        get_filename_component(LOUDMIXER_MINGW_BIN "${CMAKE_CXX_COMPILER}" DIRECTORY)
+        install(CODE "
+            if(POLICY CMP0207)
+                cmake_policy(SET CMP0207 NEW)
+            endif()
+            set(_root \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}\")
+            file(GLOB_RECURSE _exes \"\${_root}/bin/*.exe\")
+            file(GLOB_RECURSE _dlls \"\${_root}/*.dll\")
+            # bin/ primeiro: os plugins devem enxergar as DLLs já copiadas pelo
+            # windeployqt, e não as do MSYS2 (senão o CMake acusa conflito).
+            file(GET_RUNTIME_DEPENDENCIES
+                EXECUTABLES \${_exes}
+                LIBRARIES \${_dlls}
+                DIRECTORIES \"\${_root}/bin\" \"${LOUDMIXER_MINGW_BIN}\"
+                RESOLVED_DEPENDENCIES_VAR _resolved
+                UNRESOLVED_DEPENDENCIES_VAR _unresolved
+                PRE_EXCLUDE_REGEXES \"^api-ms-\" \"^ext-ms-\"
+                POST_EXCLUDE_REGEXES \"[Ss][Yy][Ss][Tt][Ee][Mm]32\")
+            file(REAL_PATH \"\${_root}\" _root_real)
+            foreach(_dep IN LISTS _resolved)
+                file(REAL_PATH \"\${_dep}\" _dep_real)
+                string(FIND \"\${_dep_real}\" \"\${_root_real}/\" _inside)
+                if(NOT _inside EQUAL 0)
+                    file(INSTALL \"\${_dep}\" DESTINATION \"\${CMAKE_INSTALL_PREFIX}/bin\")
+                endif()
+            endforeach()
+            if(_unresolved)
+                message(STATUS \"DLLs não resolvidas (devem ser do sistema): \${_unresolved}\")
+            endif()
+        ")
+    endif()
 
     set(CPACK_GENERATOR "NSIS;ZIP")
     set(CPACK_NSIS_DISPLAY_NAME "LoudMixer")

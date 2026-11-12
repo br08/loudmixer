@@ -51,6 +51,12 @@ std::string lower(std::string s)
 }
 
 // Recebe hot-plug e troca de dispositivo padrão do Windows.
+// Interfaces COM não têm destrutor virtual por design; o objeto é final e se
+// destrói pelo próprio Release(), então o aviso -Wnon-virtual-dtor não se aplica.
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnon-virtual-dtor"
+#endif
 class NotificationClient final : public IMMNotificationClient {
 public:
     explicit NotificationClient(std::function<void()> onChange) : onChange_(std::move(onChange)) {}
@@ -96,6 +102,9 @@ private:
     std::atomic<bool> enabled_{true};
     std::function<void()> onChange_;
 };
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 
 } // namespace
 

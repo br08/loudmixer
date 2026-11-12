@@ -52,27 +52,40 @@ jobs:
         run: ctest --test-dir build --output-on-failure
 
   windows:
+    # Mesmo toolchain do desenvolvimento local no VS Code: MSYS2 UCRT64
+    # (MinGW-w64 + Qt 6). Ver packaging/windows/README.md.
     runs-on: windows-2022
+    defaults:
+      run:
+        shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
-      - uses: ilammy/msvc-dev-cmd@v1
-      - uses: jurplel/install-qt-action@v4
+      - uses: msys2/setup-msys2@v2
         with:
-          version: '6.5.3'
-          arch: win64_msvc2019_64
-          cache: true
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-qt6-base
+            mingw-w64-ucrt-x86_64-qt6-tools
+            mingw-w64-ucrt-x86_64-qt6-translations
+            mingw-w64-ucrt-x86_64-gtest
+            mingw-w64-ucrt-x86_64-nsis
       - name: Configurar
-        # Sem -Werror no MSVC por enquanto: /W4 ainda não foi validado nessa toolchain.
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLOUDMIXER_WARNINGS_AS_ERRORS=ON
       - name: Compilar
         run: cmake --build build
       - name: Testes
         env:
           QT_QPA_PLATFORM: offscreen
         run: ctest --test-dir build --output-on-failure
-      - name: Instalador NSIS
-        run: cd build && cpack -G NSIS
+      - name: Instalador NSIS + ZIP
+        run: cd build && cpack -G "NSIS;ZIP"
       - uses: actions/upload-artifact@v4
         with:
-          name: loudmixer-windows-installer
-          path: build/*.exe
+          name: loudmixer-windows
+          path: |
+            build/loudmixer-*-win64.exe
+            build/loudmixer-*-win64.zip

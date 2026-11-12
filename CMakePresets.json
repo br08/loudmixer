@@ -1,0 +1,80 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "linux",
+      "hidden": true,
+      "inherits": "base",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" }
+    },
+    {
+      "name": "linux-debug",
+      "displayName": "Linux · Debug",
+      "inherits": "linux",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "linux-release",
+      "displayName": "Linux · Release",
+      "inherits": "linux",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
+    },
+    {
+      "name": "windows-mingw",
+      "hidden": true,
+      "inherits": "base",
+      "description": "MSYS2 UCRT64 (MinGW-w64 + Qt 6). Se o MSYS2 não estiver em C:/msys64, sobrescreva MSYS2_UCRT64 num CMakeUserPresets.json.",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" },
+      "binaryDir": "$penv{LOCALAPPDATA}/loudmixer-build/${presetName}",
+      "environment": {
+        "MSYS2_UCRT64": "C:/msys64/ucrt64",
+        "PATH": "$env{MSYS2_UCRT64}/bin;$penv{PATH}"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "$env{MSYS2_UCRT64}/bin/g++.exe",
+        "CMAKE_MAKE_PROGRAM": "$env{MSYS2_UCRT64}/bin/ninja.exe",
+        "CMAKE_PREFIX_PATH": "$env{MSYS2_UCRT64}"
+      }
+    },
+    {
+      "name": "windows-debug",
+      "displayName": "Windows (MinGW) · Debug",
+      "inherits": "windows-mingw",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "windows-release",
+      "displayName": "Windows (MinGW) · Release",
+      "inherits": "windows-mingw",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "linux-debug", "configurePreset": "linux-debug" },
+    { "name": "linux-release", "configurePreset": "linux-release" },
+    { "name": "windows-debug", "configurePreset": "windows-debug" },
+    { "name": "windows-release", "configurePreset": "windows-release" }
+  ],
+  "testPresets": [
+    {
+      "name": "test-base",
+      "hidden": true,
+      "output": { "outputOnFailure": true },
+      "environment": { "QT_QPA_PLATFORM": "offscreen" }
+    },
+    { "name": "linux-debug", "inherits": "test-base", "configurePreset": "linux-debug" },
+    { "name": "linux-release", "inherits": "test-base", "configurePreset": "linux-release" },
+    { "name": "windows-debug", "inherits": "test-base", "configurePreset": "windows-debug" },
+    { "name": "windows-release", "inherits": "test-base", "configurePreset": "windows-release" }
+  ]
+}

@@ -16,7 +16,7 @@ README descreve o que foi implementado, como compilar e o que ainda falta.
 |---|---|
 | **0 — Fundação** | ✅ CMake multiplataforma, `IAudioBackend`, `MockBackend`, `GainProcessor` + testes, esqueleto Qt com bandeja |
 | **1 — Linux MVP** | ✅ App / dispositivo / canal até 200%, rota de boost DSP com soft-clip, hot-plug, reconexão. Script de AppImage (não executado aqui) |
-| **2 — Windows MVP** | ✅ código completo (WASAPI, sessões, canais, loopback + reinjeção). ⚠️ Verificado só parcialmente (ver abaixo) |
+| **2 — Windows MVP** | ✅ WASAPI (sessões, dispositivo, canais) compilado e testado no Windows real; instalador NSIS gerado. ⚠️ Boost > 100% (loopback) não testado |
 | **3 — UX** | ✅ Presets, auto-start, LED de clipping, atalhos, i18n PT-BR + EN |
 | **4 — Estabilidade** | ✅ Testes com ASan/UBSan/TSan, hot-plug no mock, encerramento limpo. ⚠️ Suspender/hibernar não testado |
 
@@ -36,14 +36,19 @@ README descreve o que foi implementado, como compilar e o que ainda falta.
 - **App completo** no Linux: compila com `-Werror`, sobe contra o Pulse real,
   instância única e comandos (`--volume-up`, `--quit`…) funcionando, UI
   renderizada e conferida nas três abas, em inglês e português.
-- **Backend Windows**: compilado com MinGW-w64 (`-Wall -Wextra -Werror`) e
-  **executado no Windows real** em modo leitura: lista os dispositivos, o
-  padrão, os volumes e as sessões dos apps.
+- **Windows (MSYS2 UCRT64: GCC 16, Qt 6.12)**: o app inteiro compila com
+  `-Werror`, os 33 testes passam, e o app roda no Windows real. Instância
+  única e `--quit` funcionam, e `--volume-down` / `--volume-up` mudaram de
+  fato o volume do dispositivo padrão (63% → 58% → 63%). O instalador NSIS e
+  o ZIP são gerados, e a versão instalada roda sem o MSYS2 no PATH.
 
 ### O que NÃO foi verificado
 
-- Build com **MSVC** e a **UI no Windows** (só o backend foi compilado, com
-  MinGW). O CI (`.github/workflows/ci.yml`) cobre isso, mas ainda não rodou.
+- Build com **MSVC** (o toolchain do Windows é o MinGW do MSYS2).
+- A janela do mixer no Windows não foi conferida visualmente: o app foi
+  testado minimizado na bandeja e pelos comandos.
+- O instalador NSIS foi gerado, mas não executado.
+- O CI (`.github/workflows/ci.yml`) ainda não rodou no GitHub.
 - **`LoopbackCapture`** (boost > 100% no Windows): precisa do VB-Cable
   instalado; não foi executado.
 - **Backend PipeWire nativo**: compila, mas o ambiente de desenvolvimento não
@@ -98,6 +103,15 @@ usa escala cúbica, então o nosso "200%" aparece lá como ~126%.
 
 ## Compilar
 
+> **WSL ≠ Windows.** Compilado dentro do WSL, o LoudMixer é a versão
+> **Linux**: ele controla o servidor de áudio do WSLg (dispositivo
+> `RDPSink`), por onde passa só o som de programas Linux do WSL. O volume do
+> Windows e dos apps do Windows só é controlado pela versão **Windows**
+> (abaixo).
+
+O projeto traz `CMakePresets.json` para o VS Code (extensão CMake Tools):
+`linux-debug` / `linux-release` e `windows-debug` / `windows-release`.
+
 ### Linux (Debian 12 / Ubuntu 22.04+)
 
 ```bash
@@ -105,10 +119,10 @@ sudo apt install cmake ninja-build pkg-config g++ \
     qt6-base-dev qt6-tools-dev qt6-tools-dev-tools qt6-l10n-tools \
     libpulse-dev libpipewire-0.3-dev libspa-0.2-dev libgtest-dev
 
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
-cmake --build build
-ctest --test-dir build --output-on-failure
-./build/src/loudmixer
+cmake --preset linux-release        # ou: cmake -S . -B build -G Ninja
+cmake --build --preset linux-release
+ctest --preset linux-release
+./build-linux-release/src/loudmixer
 ```
 
 Pacotes: `cd build && cpack -G DEB` · AppImage: `packaging/linux/build-appimage.sh`
@@ -116,8 +130,17 @@ Pacotes: `cd build && cpack -G DEB` · AppImage: `packaging/linux/build-appimage
 
 ### Windows
 
-Visual Studio 2022 + Qt 6.5 (MSVC) + CMake + Ninja. Instruções e instalador
-NSIS em [packaging/windows/README.md](packaging/windows/README.md).
+Usa o **MSYS2 UCRT64** (GCC + Qt 6 + CMake + Ninja). Resumo:
+
+1. Instale o MSYS2 em `C:\msys64` e, no terminal UCRT64:
+   `pacman -S --needed mingw-w64-ucrt-x86_64-{gcc,gdb,cmake,ninja,qt6-base,qt6-tools,qt6-translations,gtest,nsis}`
+2. Ponha `C:\msys64\ucrt64\bin` no PATH do usuário e reabra o VS Code.
+3. Abra a pasta do projeto numa janela **local** do VS Code (se o código
+   estiver no WSL: `\\wsl.localhost\<distro>\...`), escolha o preset
+   **Windows (MinGW) · Debug** e aperte **F7**. **F5** depura.
+
+Passo a passo, instalador NSIS e detalhes em
+[packaging/windows/README.md](packaging/windows/README.md).
 
 ### Opções do CMake
 
@@ -172,7 +195,8 @@ dispositivo durante o teste de boost para não tocar um bipe alto.
 | PipeWire como backend primário, Pulse como fallback | **libpulse primeiro**, PipeWire nativo como fallback experimental | A libpulse cobre PulseAudio **e** PipeWire (via pipewire-pulse), trata corretamente o volume de hardware (Route) e pôde ser testada contra um servidor real |
 | `FilterChainNode` | `PulseBoostRoute` (sink virtual + captura + DSP + reprodução) | Mesmo efeito, funciona em PulseAudio e PipeWire, e permite usar o nosso `GainProcessor` (soft-clip + medição) |
 | `PulseFallback.{h,cpp}` | `PulseBackend.{h,cpp}` | Deixou de ser fallback |
-| WIL / WRL | `ComUtil.h` próprio | Compila também com MinGW (CI e cross-compile a partir do Linux) |
+| WIL / WRL | `ComUtil.h` próprio | Compila também com MinGW |
+| MSVC + Visual Studio | **MSYS2 UCRT64** (GCC/MinGW + Qt 6), no VS Code | Não exige o Visual Studio; gratuito e sem conta. É o toolchain testado e o usado no CI |
 | Qt 6.5+ | Qt **6.4+** | Debian 12 traz 6.4.2; nenhuma API usada exige 6.5 |
 | `MixerWindow.ui` / QML | Qt Widgets em código | As linhas são dinâmicas (apps aparecem/somem); o slider é desenhado à mão |
 | Soft-clip em todo boost | Soft-clip só na **rota DSP** | O ganho nativo do Pulse/PipeWire > 100% é aplicado no servidor, fora do nosso alcance |
