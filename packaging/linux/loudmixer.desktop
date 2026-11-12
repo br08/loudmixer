@@ -1,0 +1,29 @@
+[Desktop Entry]
+Type=Application
+Name=LoudMixer
+GenericName=Volume Booster
+GenericName[pt_BR]=Amplificador de volume
+Comment=Boost volume above 100% per app, device and channel
+Comment[pt_BR]=Aumente o volume acima de 100% por aplicativo, dispositivo e canal
+Exec=loudmixer
+Icon=loudmixer
+Terminal=false
+Categories=AudioVideo;Audio;Mixer;Qt;
+Keywords=volume;boost;mixer;audio;amplifier;
+StartupNotify=false
+Actions=VolumeUp;VolumeDown;Mute;
+
+[Desktop Action VolumeUp]
+Name=Volume up
+Name[pt_BR]=Aumentar volume
+Exec=loudmixer --volume-up
+
+[Desktop Action VolumeDown]
+Name=Volume down
+Name[pt_BR]=Diminuir volume
+Exec=loudmixer --volume-down
+
+[Desktop Action Mute]
+Name=Mute / unmute
+Name[pt_BR]=Silenciar / restaurar
+Exec=loudmixer --mute

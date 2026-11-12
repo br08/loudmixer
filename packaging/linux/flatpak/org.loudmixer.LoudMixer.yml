@@ -1,0 +1,33 @@
+# Manifesto Flatpak (experimental).
+#   flatpak-builder --user --install --force-clean build-flatpak packaging/linux/flatpak/org.loudmixer.LoudMixer.yml
+#
+# Limitação conhecida: dentro do sandbox, "Iniciar com o sistema" grava em
+# ~/.var/app/<id>/config/autostart e não tem efeito; seria preciso usar o
+# portal org.freedesktop.portal.Background (fica para uma versão futura).
+app-id: org.loudmixer.LoudMixer
+runtime: org.kde.Platform
+runtime-version: '6.7'
+sdk: org.kde.Sdk
+command: loudmixer
+rename-desktop-file: loudmixer.desktop
+rename-icon: loudmixer
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # Controle de volume e rota de boost (libpulse / pipewire-pulse)
+  - --socket=pulseaudio
+  # Backend PipeWire nativo
+  - --filesystem=xdg-run/pipewire-0
+  # Ícone na bandeja (StatusNotifierItem)
+  - --talk-name=org.kde.StatusNotifierWatcher
+modules:
+  - name: loudmixer
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+      - -DLOUDMIXER_BUILD_TESTS=OFF
+    sources:
+      - type: dir
+        path: ../../..

@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependências
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build pkg-config g++ \
+            qt6-base-dev qt6-tools-dev qt6-tools-dev-tools qt6-l10n-tools \
+            libpulse-dev libpipewire-0.3-dev libspa-0.2-dev libgtest-dev
+      - name: Configurar
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLOUDMIXER_WARNINGS_AS_ERRORS=ON
+      - name: Compilar
+        run: cmake --build build
+      - name: Testes
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build --output-on-failure
+      - name: Pacote .deb
+        run: cd build && cpack -G DEB
+      - uses: actions/upload-artifact@v4
+        with:
+          name: loudmixer-linux-deb
+          path: build/*.deb
+
+  linux-sanitizers:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependências
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build pkg-config g++ \
+            qt6-base-dev libpulse-dev libpipewire-0.3-dev libspa-0.2-dev libgtest-dev
+      - name: Compilar com ASan + UBSan
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DLOUDMIXER_BUILD_APP=OFF \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=undefined" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          cmake --build build
+      - name: Testes
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build --output-on-failure
+
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.5.3'
+          arch: win64_msvc2019_64
+          cache: true
+      - name: Configurar
+        # Sem -Werror no MSVC por enquanto: /W4 ainda não foi validado nessa toolchain.
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Compilar
+        run: cmake --build build
+      - name: Testes
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build --output-on-failure
+      - name: Instalador NSIS
+        run: cd build && cpack -G NSIS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: loudmixer-windows-installer
+          path: build/*.exe

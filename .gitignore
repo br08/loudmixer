@@ -1,0 +1,17 @@
+# Builds
+/build*/
+/out/
+CMakeUserPresets.json
+compile_commands.json
+.cache/
+
+# IDEs
+.vscode/
+.idea/
+*.user
+
+# Artefatos de empacotamento
+*.AppImage
+*.deb
+*.tar.gz
+/packaging/linux/flatpak/.flatpak-builder/

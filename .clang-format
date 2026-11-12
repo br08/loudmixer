@@ -1,0 +1,16 @@
+BasedOnStyle: WebKit
+ColumnLimit: 120
+IndentWidth: 4
+PointerAlignment: Left
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterClass: false
+  AfterNamespace: false
+  AfterStruct: false
+NamespaceIndentation: None
+FixNamespaceComments: true
+SortIncludes: CaseSensitive
+IncludeBlocks: Preserve
