@@ -26,6 +26,18 @@ target_link_libraries(MockBackendTest PRIVATE loudmixer_core GTest::gtest)
 loudmixer_set_warnings(MockBackendTest)
 gtest_discover_tests(MockBackendTest PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+# APO do Windows: carrega a DLL real e a exercita como o mecanismo de áudio.
+if(TARGET loudmixer_apo)
+    add_executable(ApoTest ApoTest.cpp)
+    target_include_directories(ApoTest PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_compile_definitions(ApoTest PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN
+        "LOUDMIXER_APO_DLL=\"$<TARGET_FILE:loudmixer_apo>\"")
+    target_link_libraries(ApoTest PRIVATE GTest::gtest GTest::gtest_main ole32 uuid)
+    add_dependencies(ApoTest loudmixer_apo)
+    loudmixer_set_warnings(ApoTest)
+    gtest_discover_tests(ApoTest)
+endif()
+
 # Integração com o servidor real (pula sozinho sem LOUDMIXER_LIVE_TESTS=1).
 if(TARGET PkgConfig::PULSE)
     find_package(PkgConfig REQUIRED)

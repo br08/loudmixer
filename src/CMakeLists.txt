@@ -71,6 +71,37 @@ elseif(UNIX AND NOT APPLE)
 endif()
 
 # ---------------------------------------------------------------------------
+# Windows: APO de sistema (boost do dispositivo inteiro, sem cabo virtual)
+# ---------------------------------------------------------------------------
+if(WIN32)
+    # A DLL roda dentro do audiodg.exe, que não acha as DLLs do MinGW: tudo
+    # estático (só dependências do próprio Windows).
+    add_library(loudmixer_apo SHARED
+        apo/LoudMixerApo.cpp
+        apo/ApoInterfaces.h
+        apo/ApoShared.h
+        apo/loudmixer_apo.def
+    )
+    set_target_properties(loudmixer_apo PROPERTIES PREFIX "" OUTPUT_NAME loudmixer_apo)
+    target_include_directories(loudmixer_apo PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(loudmixer_apo PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_link_libraries(loudmixer_apo PRIVATE loudmixer_dsp ole32 uuid advapi32)
+    loudmixer_set_warnings(loudmixer_apo)
+
+    add_executable(loudmixer-apo-setup apo/ApoSetup.cpp)
+    target_include_directories(loudmixer-apo-setup PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(loudmixer-apo-setup PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_link_libraries(loudmixer-apo-setup PRIVATE ole32 uuid advapi32 shell32)
+    add_dependencies(loudmixer-apo-setup loudmixer_apo)
+    loudmixer_set_warnings(loudmixer-apo-setup)
+
+    if(MINGW)
+        target_link_options(loudmixer_apo PRIVATE -static)
+        target_link_options(loudmixer-apo-setup PRIVATE -static)
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
 # Aplicativo
 # ---------------------------------------------------------------------------
 if(NOT LOUDMIXER_BUILD_APP)
