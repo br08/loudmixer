@@ -81,8 +81,17 @@ cpack -G ZIP    # versão portátil
 
 A instalação chama o `windeployqt` (DLLs e plugins do Qt) e depois copia as
 demais DLLs de que o Qt do MSYS2 depende (ICU, zstd, harfbuzz, runtime do GCC
-etc.). O resultado roda numa máquina sem o MSYS2. O desinstalador remove também
-a entrada de auto-start (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run\LoudMixer`).
+etc.). O resultado roda numa máquina sem o MSYS2. O instalador leva também o
+APO (`loudmixer_apo.dll`) e o `loudmixer-apo-setup.exe`, em `bin`, de onde o
+APO é registrado.
+
+- **Desinstalar** tira o APO de todos os dispositivos e os restaura como eram
+  antes de apagar os arquivos, e remove a entrada de auto-start
+  (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run\LoudMixer`).
+- **Atualizar** (instalar uma versão nova por cima) mantém o boost ligado nos
+  dispositivos. O DLL do APO em uso é renomeado e o novo vai para o mesmo
+  caminho; o antigo é apagado no próximo boot e o novo passa a valer quando o
+  áudio do Windows reiniciar.
 
 ### MSVC (alternativa, não testada)
 

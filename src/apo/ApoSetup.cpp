@@ -686,69 +686,111 @@ const Stage& stageByName(const std::wstring& name)
     throw Failure{L"estágio inválido: " + name + L" (use sfx, mfx ou efx)"};
 }
 
+// Stream de silêncio num dispositivo, para fazer o Windows montar a cadeia
+// de efeitos. Abrir pode falhar por alguns instantes logo depois de os
+// serviços de áudio reiniciarem (o dispositivo aparece antes de aceitar
+// streams), então quem usa tenta de novo.
+class SilentStream {
+public:
+    bool open(const std::wstring& deviceId)
+    {
+        close();
+        Com<IMMDeviceEnumerator> en;
+        Com<IMMDevice> dev;
+        if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
+                                    reinterpret_cast<void**>(en.put())))
+            || FAILED(en->GetDevice(deviceId.c_str(), dev.put()))
+            || FAILED(dev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, reinterpret_cast<void**>(&client_))))
+            return fail();
+        WAVEFORMATEX* fmt = nullptr;
+        if (FAILED(client_->GetMixFormat(&fmt)))
+            return fail();
+        align_ = fmt->nBlockAlign;
+        const HRESULT hr = client_->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, 2000000 /* 200 ms */, 0, fmt, nullptr);
+        CoTaskMemFree(fmt);
+        if (FAILED(hr) || FAILED(client_->GetBufferSize(&frames_))
+            || FAILED(client_->GetService(__uuidof(IAudioRenderClient), reinterpret_cast<void**>(&render_))))
+            return fail();
+        feed();
+        if (FAILED(client_->Start()))
+            return fail();
+        return true;
+    }
+
+    // Completa o buffer com silêncio "de verdade" (zeros, sem a marca de
+    // silêncio, que poderia fazer o Windows pular o processamento).
+    bool feed()
+    {
+        UINT32 padding = 0;
+        if (!client_ || FAILED(client_->GetCurrentPadding(&padding)))
+            return false;
+        BYTE* data = nullptr;
+        const UINT32 free = frames_ - padding;
+        if (free && SUCCEEDED(render_->GetBuffer(free, &data))) {
+            std::memset(data, 0, static_cast<size_t>(free) * align_);
+            render_->ReleaseBuffer(free, 0);
+        }
+        return true;
+    }
+
+    void close()
+    {
+        if (client_)
+            client_->Stop();
+        if (render_)
+            render_->Release();
+        if (client_)
+            client_->Release();
+        render_ = nullptr;
+        client_ = nullptr;
+    }
+    ~SilentStream() { close(); }
+
+private:
+    bool fail()
+    {
+        close();
+        return false;
+    }
+    IAudioClient* client_ = nullptr;
+    IAudioRenderClient* render_ = nullptr;
+    UINT32 frames_ = 0;
+    WORD align_ = 0;
+};
+
+enum class Verify { Processing, NotProcessing, NoStream };
+
 // Toca silêncio no dispositivo e espera o APO processar algum bloco. É a
 // única forma de saber se o Windows montou o estágio escolhido (o EFX, por
-// exemplo, não é montado em alguns dispositivos Bluetooth).
-bool verifyProcessing(const Endpoint& ep, DWORD timeoutMs)
+// exemplo, não é montado em alguns dispositivos Bluetooth). Só conclui que o
+// estágio não funciona se o stream de fato rodou por `runMs` sem o APO
+// processar; se nem o stream abre, devolve NoStream.
+Verify verifyProcessing(const Endpoint& ep, DWORD totalMs = 10000, DWORD runMs = 4000)
 {
-    Com<IMMDeviceEnumerator> en;
-    if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
-                                reinterpret_cast<void**>(en.put()))))
-        return false;
-    // Logo depois de reiniciar os serviços, os dispositivos demoram a voltar.
-    Com<IAudioClient> client;
-    for (int i = 0; i < 50 && !client.p; ++i) {
-        Com<IMMDevice> dev;
-        if (SUCCEEDED(en->GetDevice(ep.id.c_str(), dev.put())))
-            dev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, reinterpret_cast<void**>(client.put()));
-        if (!client.p)
-            Sleep(100);
-    }
-    if (!client.p)
-        return false;
-
-    WAVEFORMATEX* fmt = nullptr;
-    if (FAILED(client->GetMixFormat(&fmt)))
-        return false;
-    const WORD blockAlign = fmt->nBlockAlign;
-    const HRESULT hr = client->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, 2000000 /* 200 ms */, 0, fmt, nullptr);
-    CoTaskMemFree(fmt);
-    if (FAILED(hr))
-        return false;
-    UINT32 bufferFrames = 0;
-    Com<IAudioRenderClient> render;
-    if (FAILED(client->GetBufferSize(&bufferFrames))
-        || FAILED(client->GetService(__uuidof(IAudioRenderClient), reinterpret_cast<void**>(render.put()))))
-        return false;
-
-    auto feed = [&] {
-        UINT32 padding = 0;
-        if (FAILED(client->GetCurrentPadding(&padding)))
-            return;
-        const UINT32 free = bufferFrames - padding;
-        BYTE* data = nullptr;
-        if (free && SUCCEEDED(render->GetBuffer(free, &data))) {
-            std::memset(data, 0, static_cast<size_t>(free) * blockAlign); // silêncio "de verdade", não marcado
-            render->ReleaseBuffer(free, 0);
-        }
-    };
-    feed();
-    client->Start();
-    bool ok = false;
+    SilentStream stream;
     SharedView view;
-    const ULONGLONG deadline = GetTickCount64() + timeoutMs;
+    const ULONGLONG deadline = GetTickCount64() + totalMs;
+    ULONGLONG runningSince = 0;
     while (GetTickCount64() < deadline) {
-        Sleep(20);
-        feed();
-        if (!view && !view.open(ep.guid))
-            continue;
-        if (view.get()->lockedInstances.load() > 0 && view.get()->heartbeat.load() > 0) {
-            ok = true;
-            break;
+        if (!runningSince) {
+            if (!stream.open(ep.id)) {
+                Sleep(200);
+                continue;
+            }
+            runningSince = GetTickCount64();
         }
+        Sleep(20);
+        if (!stream.feed()) { // dispositivo sumiu/reiniciou no meio: abre de novo
+            stream.close();
+            runningSince = 0;
+            continue;
+        }
+        if ((view || view.open(ep.guid)) && view.get()->lockedInstances.load() > 0 && view.get()->heartbeat.load() > 0)
+            return Verify::Processing;
+        if (GetTickCount64() - runningSince >= runMs)
+            return Verify::NotProcessing;
     }
-    client->Stop();
-    return ok;
+    return runningSince ? Verify::NotProcessing : Verify::NoStream;
 }
 
 std::wstring registeredDll()
@@ -841,11 +883,14 @@ int cmdInstall(const std::wstring& target, const InstallOptions& opt)
             attachToEndpoint(ep.guid, *stages[i]);
         }
         say(L"  verificando o estágio " + std::wstring(stages[i]->name) + L"...");
-        if (verifyProcessing(ep, 4000)) {
+        const Verify v = verifyProcessing(ep);
+        if (v == Verify::Processing) {
             say(L"OK. O APO está processando o áudio no estágio " + std::wstring(stages[i]->name) + L".");
             return 0;
         }
-        say(L"  o Windows não montou o APO no estágio " + std::wstring(stages[i]->name));
+        say(v == Verify::NoStream ? L"  não foi possível tocar no dispositivo para verificar o estágio "
+                                        + std::wstring(stages[i]->name)
+                                  : L"  o Windows não montou o APO no estágio " + std::wstring(stages[i]->name));
     }
     {
         AudioServicesStopped audio;
@@ -865,6 +910,13 @@ int cmdUninstall(const std::wstring& target)
         guids = installedEndpoints();
     else
         guids.push_back(resolveEndpoint(target).guid);
+    if (guids.empty()) {
+        // Nenhum dispositivo com o APO (ex.: desinstalar o LoudMixer sem nunca
+        // ter ligado o boost): nada carregado no audiodg, não precisa parar o áudio.
+        cleanupIfUnused();
+        say(L"OK. Nenhum dispositivo com o APO.");
+        return 0;
+    }
     {
         AudioServicesStopped audio;
         for (const auto& g : guids)

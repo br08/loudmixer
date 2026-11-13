@@ -158,6 +158,11 @@ endif()
 
 include(GNUInstallDirs)
 install(TARGETS loudmixer RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+if(TARGET loudmixer_apo)
+    # O APO é registrado a partir desta pasta (Program Files): o audiodg, que
+    # roda como LOCAL SERVICE, consegue lê-la.
+    install(TARGETS loudmixer_apo loudmixer-apo-setup RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
 if(UNIX AND NOT APPLE)
     install(FILES ${PROJECT_SOURCE_DIR}/packaging/linux/loudmixer.desktop
             DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)

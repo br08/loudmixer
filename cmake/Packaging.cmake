@@ -14,6 +14,9 @@ set(CPACK_PACKAGE_HOMEPAGE_URL ${PROJECT_HOMEPAGE_URL})
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "LoudMixer")
 set(CPACK_PACKAGE_EXECUTABLES "loudmixer;LoudMixer")
 set(CPACK_STRIP_FILES ON)
+# Valores passados literalmente ao gerador (os comandos NSIS abaixo têm
+# barras invertidas e "$" que não devem ser reinterpretados pelo CMake).
+set(CPACK_VERBATIM_VARIABLES ON)
 
 if(WIN32)
     # Copia as DLLs do Qt e os plugins necessários (windeployqt) na instalação.
@@ -72,13 +75,55 @@ if(WIN32)
     set(CPACK_NSIS_PACKAGE_NAME "LoudMixer ${PROJECT_VERSION}")
     set(CPACK_NSIS_MUI_ICON "${PROJECT_SOURCE_DIR}/resources/icons/loudmixer.ico")
     set(CPACK_NSIS_MUI_UNIICON "${PROJECT_SOURCE_DIR}/resources/icons/loudmixer.ico")
-    set(CPACK_NSIS_INSTALLED_ICON_NAME "bin\\\\loudmixer.exe")
+    set(CPACK_NSIS_INSTALLED_ICON_NAME "bin\\loudmixer.exe")
     set(CPACK_NSIS_EXECUTABLES_DIRECTORY "bin")
     set(CPACK_NSIS_MUI_FINISHPAGE_RUN "loudmixer.exe")
     set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
-    # Remove a entrada de auto-start ao desinstalar.
-    set(CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS
-        "DeleteRegValue HKCU 'Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run' 'LoudMixer'")
+    # APO (boost do sistema). O audiodg mantém o loudmixer_apo.dll carregado
+    # enquanto o boost está ativo em algum dispositivo: o arquivo não pode ser
+    # sobrescrito nem apagado, mas pode ser renomeado. O renomeado some no
+    # próximo boot.
+    set(LOUDMIXER_NSIS_MOVE_APO_ASIDE [=[
+  IfFileExists "$INSTDIR\bin\loudmixer_apo.dll" 0 +5
+    GetTempFileName $R0 "$INSTDIR\bin"
+    Delete "$R0"
+    Rename "$INSTDIR\bin\loudmixer_apo.dll" "$R0"
+    Delete /REBOOTOK "$R0"
+]=])
+    # Atualização: o DLL novo vai para o mesmo caminho registrado; o boost
+    # dos dispositivos continua ativo e passa a usar o DLL novo quando o
+    # áudio reiniciar.
+    set(CPACK_NSIS_EXTRA_PREINSTALL_COMMANDS "${LOUDMIXER_NSIS_MOVE_APO_ASIDE}")
+    # Nos comandos NSIS, comentários usam "#": o ";" separa itens de lista no CMake.
+    # Desinstalação: tira o APO de todos os dispositivos e restaura o áudio
+    # como era, antes de apagar os arquivos (a ferramenta ainda existe). Na
+    # atualização, o instalador novo roda este desinstalador em modo silencioso
+    # e no próprio lugar ($EXEDIR = $INSTDIR): aí o boost é mantido.
+    set(CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS [=[
+  IfSilent 0 lm_apo_remove
+  StrCmp "$EXEDIR" "$INSTDIR" 0 lm_apo_remove
+]=] "${LOUDMIXER_NSIS_MOVE_APO_ASIDE}" [=[
+  Goto lm_apo_done
+lm_apo_remove:
+  IfFileExists "$INSTDIR\bin\loudmixer-apo-setup.exe" 0 +2
+    ExecWait '"$INSTDIR\bin\loudmixer-apo-setup.exe" uninstall all'
+  # Sobra de atualização com o boost ativo (DLL antiga renomeada para *.tmp):
+  # apaga a pasta bin (sempre nossa) agora e agenda para o boot o que ainda
+  # estiver em uso. A pasta de instalação nunca leva /r (pode ter sido
+  # escolhida pelo usuário). MoveFileEx só a remove no boot se estiver vazia.
+  IfFileExists "$INSTDIR\bin\*.tmp" 0 +3
+    RMDir /r /REBOOTOK "$INSTDIR\bin"
+    System::Call 'kernel32::MoveFileExW(w "$INSTDIR", p 0, i 4)'
+
+  # A subchave do instalador (Software\<vendor>\<chave>) só seria apagada
+  # depois: apaga antes, para a chave-mãe, compartilhada com o APO, sair vazia.
+  DeleteRegKey HKLM "Software\LoudMixer\LoudMixer"
+  DeleteRegKey /ifempty HKLM "Software\LoudMixer"
+lm_apo_done:
+  # Remove a entrada de auto-start.
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "LoudMixer"
+]=])
+    string(JOIN "" CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS ${CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS})
 elseif(UNIX AND NOT APPLE)
     set(CPACK_GENERATOR "DEB;TGZ")
     set(CPACK_DEBIAN_PACKAGE_MAINTAINER "LoudMixer maintainers")
