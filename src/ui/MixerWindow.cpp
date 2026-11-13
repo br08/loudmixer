@@ -220,7 +220,7 @@ void MixerWindow::syncDevices()
     const auto& devices = manager_->devices();
     std::set<std::string> alive;
     const bool canBoost = manager_->supportsBoostRoute();
-    bool anyRoute = false;
+    bool anyLed = false;
 
     for (const auto& d : devices) {
         alive.insert(d.id);
@@ -240,7 +240,9 @@ void MixerWindow::syncDevices()
             }
         }
         const bool routed = manager_->boostRouteActive(d.id);
-        anyRoute |= routed;
+        // Com boost do sistema (APO), o LED mostra o soft-clip dele.
+        const bool led = routed || d.systemBoost;
+        anyLed |= led;
         const QString label = QString::fromStdString(d.description);
         row->setIcon(deviceIcon(d.isDefault));
         row->setLabel(label, d.isDefault ? tr("%1\nDefault output device").arg(label) : label);
@@ -248,10 +250,12 @@ void MixerWindow::syncDevices()
         row->setMaxGain(manager_->maxGain(Target::device(d.id)));
         row->setGain(d.gain);
         row->setMuted(d.muted);
-        row->setLedVisible(routed);
+        row->setLedVisible(led);
         if (auto box = boostBoxes_.find(d.id); box != boostBoxes_.end()) {
             const QSignalBlocker block(box->second);
             box->second->setChecked(routed);
+            // O dispositivo já tem boost do sistema: a rota DSP seria redundante.
+            box->second->setVisible(!d.systemBoost || routed);
         }
     }
     for (auto it = boostBoxes_.begin(); it != boostBoxes_.end();)
@@ -262,9 +266,9 @@ void MixerWindow::syncDevices()
         devicesLayout_->addWidget(deviceRows_[d.id]);
     emptyDevices_->setVisible(devices.empty());
 
-    if (anyRoute && isVisible())
+    if (anyLed && isVisible())
         ledTimer_.start();
-    else if (!anyRoute)
+    else if (!anyLed)
         ledTimer_.stop();
 
     QString status = tr("Audio backend: %1").arg(manager_->backendName());
@@ -279,13 +283,20 @@ void MixerWindow::syncDevices()
 void MixerWindow::updateLeds()
 {
     const qint64 now = clock_.elapsed();
-    for (const auto& id : manager_->activeBoostRoutes()) {
-        auto row = deviceRows_.find(id);
+    for (const auto& d : manager_->devices()) {
+        if (!d.systemBoost && !manager_->boostRouteActive(d.id))
+            continue;
+        auto row = deviceRows_.find(d.id);
         if (row == deviceRows_.end())
             continue;
-        if (auto stats = manager_->takeStats(id); stats && stats->clippedSamples > 0)
-            clipHoldUntil_[id] = now + kClipHoldMs;
-        row->second->setLedState(now < clipHoldUntil_[id] ? ClipLed::State::Clipping : ClipLed::State::Active);
+        const auto stats = manager_->takeStats(d.id);
+        if (!stats) { // boost do sistema ainda não carregado (nenhum áudio tocou)
+            row->second->setLedState(ClipLed::State::Off);
+            continue;
+        }
+        if (stats->clippedSamples > 0)
+            clipHoldUntil_[d.id] = now + kClipHoldMs;
+        row->second->setLedState(now < clipHoldUntil_[d.id] ? ClipLed::State::Clipping : ClipLed::State::Active);
     }
 }
 
@@ -388,7 +399,9 @@ void MixerWindow::closeEvent(QCloseEvent* event)
 void MixerWindow::showEvent(QShowEvent* event)
 {
     QWidget::showEvent(event);
-    if (!manager_->activeBoostRoutes().empty())
+    const auto& devices = manager_->devices();
+    if (!manager_->activeBoostRoutes().empty()
+        || std::any_of(devices.begin(), devices.end(), [](const AudioDevice& d) { return d.systemBoost; }))
         ledTimer_.start();
 }
 

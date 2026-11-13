@@ -1,8 +1,11 @@
 #include "WasapiBackend.h"
 
+#include "ApoRouteMath.h"
 #include "ComUtil.h"
 #include "LoopbackCapture.h"
 #include "SessionEnumerator.h"
+#include "apo/ApoRegistry.h"
+#include "apo/ApoShared.h"
 #include "core/GainProcessor.h"
 
 #include <endpointvolume.h>
@@ -128,6 +131,29 @@ struct WasapiBackend::Impl {
     std::vector<double> routeChannelGains;
     std::map<std::string, double> appDesired; // sessões no cabo virtual
     double appBoost = 1.0;                    // B
+
+    // Boost do sistema (APO), por dispositivo
+    struct ApoDevice {
+        std::wstring guid;
+        std::shared_ptr<apo::SharedView> view; // aberta quando o APO existe
+        double deviceFactor = 1.0;             // 1..2
+        std::vector<double> channelFactors;    // 1..2
+        std::map<std::string, double> appDesired;
+        double appBoost = 1.0; // B
+        bool seeding = true;   // primeira varredura: sessões já atenuadas por nós
+        bool dirty = false;    // salvar no registro
+        bool cannotPersist = false;
+    };
+    std::map<std::string, ApoDevice> apo; // id do endpoint -> estado
+
+    // Lido pela thread da UI (LED) via takeDeviceStats.
+    struct StatsSource {
+        std::shared_ptr<apo::SharedView> view;
+        std::uint64_t lastClipped = 0;
+        std::uint64_t lastProcessed = 0;
+    };
+    std::mutex statsMutex;
+    std::map<std::string, StatsSource> stats;
 };
 
 WasapiBackend::WasapiBackend()
@@ -255,7 +281,10 @@ void WasapiBackend::workerLoop(std::string* startError, int* startState)
         }
     }
 
-    // Encerramento: desmonta a rota e libera COM nesta mesma thread.
+    // Encerramento: salva o boost do sistema, desmonta a rota e libera COM
+    // nesta mesma thread. (O APO segue aplicando o último ganho com o app
+    // fechado; as sessões continuam atenuadas de forma coerente com ele.)
+    flushApoState();
     if (d_->capture) {
         d_->capture->stop();
         d_->capture.reset();
@@ -304,6 +333,7 @@ void WasapiBackend::refresh()
     std::vector<AudioDevice> devices;
     std::vector<AudioSession> sessions;
     bool needApply = false;
+    std::vector<std::string> apoToApply;
 
     for (UINT i = 0; i < count; ++i) {
         ComPtr<IMMDevice> dev;
@@ -351,6 +381,50 @@ void WasapiBackend::refresh()
             for (std::size_t c = 0; c < d.channels.size() && c < d_->routeChannelGains.size(); ++c)
                 d.channels[c].gain = d_->routeChannelGains[c];
         }
+
+        // Boost do sistema: o APO do LoudMixer está na cadeia deste dispositivo?
+        Impl::ApoDevice* apoDev = nullptr;
+        if (const std::wstring guid = apo::normalizeEndpointGuid(win::toWide(id)); apo::isAttached(guid)) {
+            auto [it, isNew] = d_->apo.try_emplace(id);
+            apoDev = &it->second;
+            if (!apoDev->view || !*apoDev->view) {
+                auto view = std::make_shared<apo::SharedView>();
+                if (view->open(guid)) {
+                    apoDev->view = view;
+                    std::lock_guard lock(d_->statsMutex);
+                    d_->stats[id] = Impl::StatsSource{view, view->get()->clippedSamples.load(),
+                                                      view->get()->processedSamples.load()};
+                    if (!isNew)
+                        apoToApply.push_back(id); // APO recriado: garante o estado atual
+                }
+            }
+            if (isNew) {
+                // Estado salvo (memória compartilhada, mais exata, ou registro).
+                const apo::Persisted saved = apo::readPersisted(guid);
+                double master = saved.found ? saved.master : 1.0;
+                std::vector<float> chans = saved.channels;
+                if (apoDev->view && *apoDev->view) {
+                    auto* sh = apoDev->view->get();
+                    master = sh->gain.load();
+                    chans.clear();
+                    for (std::size_t c = 0; c < d.channels.size() && c < apo::kSharedMaxChannels; ++c)
+                        chans.push_back(sh->channelGains[c].load());
+                }
+                apoDev->guid = guid;
+                apoDev->appBoost = saved.appBoost;
+                apoDev->deviceFactor = apoRoute::deviceFactorFrom(master, saved.appBoost);
+                apoDev->channelFactors.assign(d.channels.size(), 1.0);
+                for (std::size_t c = 0; c < apoDev->channelFactors.size() && c < chans.size(); ++c)
+                    apoDev->channelFactors[c] = std::clamp(static_cast<double>(chans[c]), 1.0, apoRoute::kMax);
+            }
+            apoDev->channelFactors.resize(d.channels.size(), 1.0);
+            d.systemBoost = true;
+            d.gain = apoRoute::combine(d.gain, apoDev->deviceFactor);
+            for (std::size_t c = 0; c < d.channels.size(); ++c)
+                d.channels[c].gain = apoRoute::combine(d.channels[c].gain, apoDev->channelFactors[c]);
+        } else if (d_->apo.count(id)) {
+            detachApo(id); // removido por fora (driver atualizado, uninstall...)
+        }
         devices.push_back(d);
 
         for (auto& s : win::enumerateSessions(dev.get())) {
@@ -362,7 +436,27 @@ void WasapiBackend::refresh()
             as.deviceId = id;
             as.muted = s.muted;
             as.gain = s.volume;
-            if (id == routeSource && !routeTarget.empty()) {
+            if (apoDev) {
+                auto want = apoDev->appDesired.find(s.id);
+                if (want == apoDev->appDesired.end()) {
+                    // Na primeira varredura, as sessões já existentes foram
+                    // atenuadas por nós (nativo × B). Sessões novas começam no
+                    // próprio volume nativo: nunca mais alto que o pedido.
+                    const double desired =
+                        apoDev->seeding ? apoRoute::clampGain(s.volume * apoDev->appBoost) : s.volume;
+                    apoDev->appDesired[s.id] = desired;
+                    as.gain = desired;
+                    if (!apoDev->seeding && apoDev->appBoost > 1.0)
+                        apoToApply.push_back(id);
+                } else {
+                    const double observed = apoRoute::observeSession(s.volume, want->second, apoDev->appBoost);
+                    if (std::fabs(observed - want->second) > 1e-9) {
+                        want->second = observed; // mudou pelo mixer do Windows
+                        apoToApply.push_back(id);
+                    }
+                    as.gain = want->second;
+                }
+            } else if (id == routeSource && !routeTarget.empty()) {
                 auto want = d_->appDesired.find(s.id);
                 if (want == d_->appDesired.end()) {
                     // Sessão nova no cabo: começa em 100% efetivo.
@@ -383,12 +477,26 @@ void WasapiBackend::refresh()
             sessionEntries[s.id] = std::move(s);
         }
         entries[id] = std::move(entry);
+        if (apoDev)
+            apoDev->seeding = false;
     }
 
     d_->devices = std::move(entries);
     d_->sessions = std::move(sessionEntries);
     d_->sessionDevice = std::move(sessionDevice);
     std::erase_if(d_->appDesired, [&](const auto& kv) { return d_->sessions.count(kv.first) == 0; });
+    for (auto& [devId, a] : d_->apo)
+        std::erase_if(a.appDesired, [&](const auto& kv) { return d_->sessions.count(kv.first) == 0; });
+    // Dispositivo com APO que sumiu (desconectado): esquece o estado em memória.
+    for (auto it = d_->apo.begin(); it != d_->apo.end();) {
+        if (d_->devices.count(it->first)) {
+            ++it;
+            continue;
+        }
+        std::lock_guard lock(d_->statsMutex);
+        d_->stats.erase(it->first);
+        it = d_->apo.erase(it);
+    }
 
     // Rota cujo dispositivo sumiu (fone desconectado): desmonta.
     if (!routeTarget.empty() && (!d_->devices.count(routeTarget) || !d_->devices.count(routeSource))) {
@@ -427,6 +535,93 @@ void WasapiBackend::refresh()
         notify(ev.kind, ev.id);
     if (needApply)
         applyRouteGains();
+    std::sort(apoToApply.begin(), apoToApply.end());
+    apoToApply.erase(std::unique(apoToApply.begin(), apoToApply.end()), apoToApply.end());
+    for (const auto& id : apoToApply)
+        applyApoGains(id);
+    flushApoState();
+}
+
+// Boost do sistema: distribui o ganho entre as sessões (pré-atenuação) e o
+// APO, e publica na memória compartilhada (ver ApoRouteMath.h).
+void WasapiBackend::applyApoGains(const std::string& deviceId)
+{
+    auto it = d_->apo.find(deviceId);
+    if (it == d_->apo.end())
+        return;
+    auto& a = it->second;
+    a.appBoost = apoRoute::appBoost(a.appDesired);
+    for (const auto& [sid, want] : a.appDesired) {
+        auto s = d_->sessions.find(sid);
+        if (s == d_->sessions.end() || !s->second.control)
+            continue;
+        const double native = apoRoute::sessionNative(want, a.appBoost);
+        if (std::fabs(native - s->second.volume) > 0.001) {
+            s->second.control->SetMasterVolume(static_cast<float>(native), nullptr);
+            s->second.volume = static_cast<float>(native);
+        }
+    }
+    if (a.view && *a.view) {
+        auto* sh = a.view->get();
+        sh->gain.store(static_cast<float>(apoRoute::apoMaster(a.deviceFactor, a.appBoost)));
+        for (std::size_t c = 0; c < a.channelFactors.size() && c < apo::kSharedMaxChannels; ++c)
+            sh->channelGains[c].store(static_cast<float>(a.channelFactors[c]));
+    }
+    a.dirty = true;
+}
+
+// O APO saiu da cadeia do dispositivo: devolve as sessões ao volume nativo
+// equivalente (até 100%) e esquece o estado.
+void WasapiBackend::detachApo(const std::string& deviceId)
+{
+    auto it = d_->apo.find(deviceId);
+    if (it == d_->apo.end())
+        return;
+    for (const auto& [sid, want] : it->second.appDesired) {
+        auto s = d_->sessions.find(sid);
+        if (s != d_->sessions.end() && s->second.control)
+            s->second.control->SetMasterVolume(static_cast<float>(std::min(want, 1.0)), nullptr);
+    }
+    {
+        std::lock_guard lock(d_->statsMutex);
+        d_->stats.erase(deviceId);
+    }
+    d_->apo.erase(it);
+}
+
+// Salva o estado efetivo no registro para o APO reaplicar quando o Windows o
+// recriar (reboot, reconexão), mesmo com o app fechado. Em lote: no máximo
+// uma vez por varredura, não a cada movimento do slider.
+void WasapiBackend::flushApoState()
+{
+    for (auto& [id, a] : d_->apo) {
+        if (!a.dirty || a.cannotPersist)
+            continue;
+        a.dirty = false;
+        std::vector<float> chans(a.channelFactors.begin(), a.channelFactors.end());
+        if (!apo::writePersisted(a.guid, static_cast<float>(apoRoute::apoMaster(a.deviceFactor, a.appBoost)),
+                                 static_cast<float>(a.appBoost), chans))
+            a.cannotPersist = true; // instalação sem permissão para usuários: só não persiste
+    }
+}
+
+std::optional<ProcessorStats> WasapiBackend::takeDeviceStats(const std::string& deviceId)
+{
+    std::lock_guard lock(d_->statsMutex);
+    auto it = d_->stats.find(deviceId);
+    if (it == d_->stats.end() || !it->second.view || !*it->second.view)
+        return std::nullopt;
+    auto* sh = it->second.view->get();
+    ProcessorStats st;
+    st.peakIn = sh->peakIn.exchange(0.0f);
+    st.peakOut = sh->peakOut.exchange(0.0f);
+    const std::uint64_t clipped = sh->clippedSamples.load();
+    const std::uint64_t processed = sh->processedSamples.load();
+    st.clippedSamples = clipped >= it->second.lastClipped ? clipped - it->second.lastClipped : 0;
+    st.processedSamples = processed >= it->second.lastProcessed ? processed - it->second.lastProcessed : 0;
+    it->second.lastClipped = clipped;
+    it->second.lastProcessed = processed;
+    return st;
 }
 
 // Distribui o ganho entre pré-atenuação das sessões e o DSP (ver header).
@@ -501,6 +696,18 @@ std::vector<ChannelInfo> WasapiBackend::listChannels(const std::string& deviceId
 double WasapiBackend::maxGain(const Target& target) const
 {
     std::lock_guard lock(dataMutex_);
+    // Boost do sistema (APO): dispositivo, canais e apps desse dispositivo.
+    auto systemBoost = [&](const std::string& deviceId) {
+        return std::any_of(devices_.begin(), devices_.end(),
+                           [&](const AudioDevice& d) { return d.id == deviceId && d.systemBoost; });
+    };
+    if (target.kind == TargetKind::Application) {
+        for (const auto& s : sessions_)
+            if (s.id == target.id && systemBoost(s.deviceId))
+                return kMaxGain;
+    } else if (systemBoost(target.id)) {
+        return kMaxGain;
+    }
     if (routeTarget_.empty())
         return kUnityGain;
     if (target.kind == TargetKind::Application) {
@@ -525,6 +732,13 @@ bool WasapiBackend::setGain(const Target& target, double gain)
             auto s = d_->sessions.find(target.id);
             if (s == d_->sessions.end() || !s->second.control)
                 return false;
+            if (auto dev = d_->sessionDevice.find(target.id); dev != d_->sessionDevice.end()) {
+                if (auto a = d_->apo.find(dev->second); a != d_->apo.end()) {
+                    a->second.appDesired[target.id] = gain;
+                    applyApoGains(dev->second);
+                    return true;
+                }
+            }
             if (d_->appDesired.count(target.id)) {
                 d_->appDesired[target.id] = gain;
                 applyRouteGains();
@@ -535,6 +749,23 @@ bool WasapiBackend::setGain(const Target& target, double gain)
         auto dev = d_->devices.find(target.id);
         if (dev == d_->devices.end() || !dev->second.volume)
             return false;
+        if (auto a = d_->apo.find(target.id); a != d_->apo.end()) {
+            // Até 100% no volume do Windows, acima disso no APO.
+            const auto part = apoRoute::split(gain);
+            HRESULT hr;
+            if (target.kind == TargetKind::Device) {
+                hr = dev->second.volume->SetMasterVolumeLevelScalar(static_cast<float>(part.native), nullptr);
+                a->second.deviceFactor = part.factor;
+            } else {
+                if (target.channel < 0 || target.channel >= static_cast<int>(a->second.channelFactors.size()))
+                    return false;
+                hr = dev->second.volume->SetChannelVolumeLevelScalar(static_cast<UINT>(target.channel),
+                                                                     static_cast<float>(part.native), nullptr);
+                a->second.channelFactors[static_cast<std::size_t>(target.channel)] = part.factor;
+            }
+            applyApoGains(target.id);
+            return SUCCEEDED(hr);
+        }
         if (target.kind == TargetKind::Device) {
             if (target.id == routeTarget) {
                 d_->routeDeviceGain = gain;
@@ -627,6 +858,10 @@ bool WasapiBackend::attachProcessor(const Target& target, std::shared_ptr<GainPr
 
         if (!currentTarget.empty()) {
             err = LM_TRANSLATE_NOOP("backend", "DSP boost is already active on another device (v1 supports one at a time).");
+            return false;
+        }
+        if (d_->apo.count(target.id)) {
+            err = LM_TRANSLATE_NOOP("backend", "This device already boosts above 100% through the LoudMixer system effect.");
             return false;
         }
 

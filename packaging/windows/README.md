@@ -56,6 +56,21 @@ Se o MSYS2 estiver em outro lugar, crie um `CMakeUserPresets.json` (ignorado
 pelo git) com um preset que herde de `windows-debug` e redefina
 `MSYS2_UCRT64` no `environment`.
 
+### A partir do WSL
+
+Com o código no WSL, a versão Windows também pode ser compilada e aberta
+direto do terminal do WSL (ou da janela WSL do VS Code), sem janela local:
+
+```bash
+tools/windows-dev.sh            # compila (Debug) e abre o app no Windows
+tools/windows-dev.sh test       # compila e roda os testes no Windows
+tools/windows-dev.sh run release
+```
+
+No VS Code, as mesmas ações estão em *Terminal > Run Task*: **Windows: rodar
+(dev)**, **Windows: compilar (dev)** e **Windows: testes**. Esse caminho não
+tem depurador; para depurar com o gdb, use a janela local descrita acima.
+
 ## 3. Instalador
 
 ```powershell
@@ -77,15 +92,45 @@ nunca foi compilado. Com Build Tools for Visual Studio 2022 + Qt para MSVC:
 
 ## Boost acima de 100% no Windows
 
-O Windows não permite ganho acima de 100% pelas APIs de volume. O LoudMixer
-usa a rota descrita no plano: os apps tocam num **cabo de áudio virtual** e o
-LoudMixer captura esse áudio (loopback), aplica o ganho com soft-clip e o
-reinjeta no dispositivo real.
+As APIs de volume do Windows param em 100%. Para passar disso, o LoudMixer tem
+um **efeito de sistema (APO)** próprio: uma DLL que o Windows carrega na cadeia
+de efeitos do dispositivo e que aplica o ganho, com soft-clip, à mistura dos
+apps. Com o APO num dispositivo, os sliders do dispositivo, dos canais e dos
+apps que tocam nele vão até 200%, sem cabo virtual e sem trocar a saída padrão.
+
+Por enquanto, o APO é ativado pela ferramenta `loudmixer-apo-setup`, que fica
+ao lado do `loudmixer.exe` na pasta de build. O botão no app e a integração com
+o instalador estão planejados na issue #1.
+
+```powershell
+loudmixer-apo-setup list              # dispositivos e estado do APO
+loudmixer-apo-setup install default   # ativa no dispositivo padrão (pede UAC)
+loudmixer-apo-setup status default    # o áudio está passando pelo APO?
+loudmixer-apo-setup uninstall all     # remove e restaura os dispositivos
+```
+
+- O `install` liga os **aprimoramentos de áudio** do dispositivo (o Windows só
+  roda APOs assim). Isso também ativa os efeitos do fabricante, se houver.
+- Ele escolhe sozinho o estágio da cadeia (EFX, MFX ou SFX) e confere se o
+  áudio passa pelo APO. Se nenhum estágio funcionar, restaura o dispositivo e
+  sai com o código 3.
+- Durante o `install` e o `uninstall`, o áudio para por alguns segundos
+  (os serviços de áudio são reiniciados).
+- O `uninstall` restaura os valores originais do dispositivo, guardados no
+  `install`.
+
+Os riscos conhecidos dessa abordagem estão nas issues com a label `risco`.
+
+### Alternativa: cabo virtual
+
+Para dispositivos em que o APO não funciona, o LoudMixer também pode passar de
+100% por um cabo de áudio virtual: os apps tocam no cabo, o LoudMixer captura
+esse áudio (loopback), aplica o ganho com soft-clip e o reinjeta no dispositivo
+real.
 
 1. Instale o [VB-Audio Virtual Cable](https://vb-audio.com/Cable/) (gratuito).
 2. Em *Configurações > Som*, defina **CABLE Input** como saída padrão.
 3. No LoudMixer, aba **Dispositivos**, marque **Boost DSP** no seu fone/caixa.
 
-A partir daí os sliders de apps, do dispositivo e dos canais vão até 200%.
 Outro cabo virtual pode ser escolhido em *Configurações > Dispositivo de
-origem do boost*.
+origem do boost*. Em dispositivos com o APO, a opção **Boost DSP** não aparece.

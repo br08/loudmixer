@@ -11,15 +11,15 @@
 //  - Depois que stop() retorna, nenhum callback pode mais ser disparado.
 
 #include "AudioTypes.h"
+#include "GainProcessor.h"
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace loudmixer {
-
-class GainProcessor;
 
 class IAudioBackend {
 public:
@@ -62,6 +62,15 @@ public:
     // são suportados. Enquanto ativo, setGain() no dispositivo passa a
     // controlar o ganho do processador.
     virtual bool supportsProcessor(TargetKind kind) const { (void)kind; return false; }
+
+    // Estatísticas de processamento de um dispositivo cujo boost é feito pelo
+    // próprio sistema (AudioDevice::systemBoost). Zera os picos a cada leitura.
+    // Pode ser chamada de qualquer thread.
+    virtual std::optional<ProcessorStats> takeDeviceStats(const std::string& deviceId)
+    {
+        (void)deviceId;
+        return std::nullopt;
+    }
     virtual bool attachProcessor(const Target& target, std::shared_ptr<GainProcessor> processor, std::string* error)
     {
         (void)target;

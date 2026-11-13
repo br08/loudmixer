@@ -39,9 +39,12 @@ if(WIN32)
         backend/windows/SessionEnumerator.h
         backend/windows/LoopbackCapture.cpp
         backend/windows/LoopbackCapture.h
+        backend/windows/ApoRouteMath.h
+        apo/ApoRegistry.h
+        apo/ApoShared.h
     )
     target_compile_definitions(loudmixer_core PRIVATE LOUDMIXER_HAVE_WASAPI UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
-    target_link_libraries(loudmixer_core PUBLIC ole32 oleaut32 uuid avrt)
+    target_link_libraries(loudmixer_core PUBLIC ole32 oleaut32 uuid avrt advapi32)
 elseif(UNIX AND NOT APPLE)
     find_package(PkgConfig REQUIRED)
     if(LOUDMIXER_WITH_PULSE)

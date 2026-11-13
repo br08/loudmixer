@@ -224,6 +224,32 @@ void MockBackend::removeSession(const std::string& id)
     emit(ChangeKind::SessionRemoved, id);
 }
 
+void MockBackend::setSystemBoost(const std::string& deviceId, bool enabled, ProcessorStats stats)
+{
+    {
+        std::lock_guard lock(mutex_);
+        for (auto& d : devices_)
+            if (d.id == deviceId)
+                d.systemBoost = enabled;
+        if (enabled)
+            systemStats_[deviceId] = stats;
+        else
+            systemStats_.erase(deviceId);
+    }
+    emit(ChangeKind::DeviceChanged, deviceId);
+}
+
+std::optional<ProcessorStats> MockBackend::takeDeviceStats(const std::string& deviceId)
+{
+    std::lock_guard lock(mutex_);
+    auto it = systemStats_.find(deviceId);
+    if (it == systemStats_.end())
+        return std::nullopt;
+    ProcessorStats out = it->second;
+    it->second = {}; // como o APO: a leitura zera
+    return out;
+}
+
 void MockBackend::setDefaultDevice(const std::string& id)
 {
     {

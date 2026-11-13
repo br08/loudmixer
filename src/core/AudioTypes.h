@@ -64,6 +64,9 @@ struct AudioDevice {
     bool muted = false;
     double gain = kUnityGain;
     std::vector<ChannelInfo> channels;
+    // O caminho de áudio do sistema já aplica boost acima de 100% com
+    // soft-clip (APO do LoudMixer no Windows): não precisa de rota DSP própria.
+    bool systemBoost = false;
 
     bool operator==(const AudioDevice&) const = default;
 };

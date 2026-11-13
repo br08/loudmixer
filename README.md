@@ -16,7 +16,7 @@ README descreve o que foi implementado, como compilar e o que ainda falta.
 |---|---|
 | **0 — Fundação** | ✅ CMake multiplataforma, `IAudioBackend`, `MockBackend`, `GainProcessor` + testes, esqueleto Qt com bandeja |
 | **1 — Linux MVP** | ✅ App / dispositivo / canal até 200%, rota de boost DSP com soft-clip, hot-plug, reconexão. Script de AppImage (não executado aqui) |
-| **2 — Windows MVP** | ✅ WASAPI (sessões, dispositivo, canais) compilado e testado no Windows real; instalador NSIS gerado. ⚠️ Boost > 100% (loopback) não testado |
+| **2 — Windows MVP** | ✅ WASAPI (sessões, dispositivo, canais) compilado e testado no Windows real; instalador NSIS gerado. Boost > 100% por efeito de sistema (APO) próprio, testado no Windows real; cabo virtual como alternativa |
 | **3 — UX** | ✅ Presets, auto-start, LED de clipping, atalhos, i18n PT-BR + EN |
 | **4 — Estabilidade** | ✅ Testes com ASan/UBSan/TSan, hot-plug no mock, encerramento limpo. ⚠️ Suspender/hibernar não testado |
 
@@ -41,6 +41,13 @@ README descreve o que foi implementado, como compilar e o que ainda falta.
   única e `--quit` funcionam, e `--volume-down` / `--volume-up` mudaram de
   fato o volume do dispositivo padrão (63% → 58% → 63%). O instalador NSIS e
   o ZIP são gerados, e a versão instalada roda sem o MSYS2 no PATH.
+- **APO no Windows 11 real** (fone Bluetooth): o Windows carrega a DLL não
+  assinada; a escolha automática de estágio caiu no MFX depois de o EFX não
+  ser montado; em 200% o som fica mais alto, com o soft-clip segurando os
+  picos. O `WasapiApoLiveTest` confirmou dispositivo, canal e app chegando ao
+  APO, o limite de 200% e o estado salvo no registro sem administrador. O
+  `uninstall` restaurou o dispositivo exatamente como estava.
+- **Cabo virtual** (VB-Audio Cable): testado manualmente no Windows real.
 
 ### O que NÃO foi verificado
 
@@ -49,8 +56,11 @@ README descreve o que foi implementado, como compilar e o que ainda falta.
   testado minimizado na bandeja e pelos comandos.
 - O instalador NSIS foi gerado, mas não executado.
 - O CI (`.github/workflows/ci.yml`) ainda não rodou no GitHub.
-- **`LoopbackCapture`** (boost > 100% no Windows): precisa do VB-Cable
-  instalado; não foi executado.
+- **APO** num alto-falante com efeitos do fabricante no estágio EFX (só foi
+  testado num fone Bluetooth, onde ele roda no estágio MFX), em DAC USB e HDMI,
+  e com conteúdo protegido por DRM.
+- Registro do APO a partir da pasta de instalação (`Program Files`), que só o
+  instalador exercita.
 - **Backend PipeWire nativo**: compila, mas o ambiente de desenvolvimento não
   tinha daemon PipeWire. Só o caminho de erro foi testado.
 - Reconexão automática do Pulse após o servidor reiniciar.
@@ -66,7 +76,7 @@ UI (Qt Widgets) ── TrayController · MixerWindow · ChannelsPanel · GainSli
         │  sinais/slots
 Núcleo  ── AudioSessionManager · GainProcessor (DSP) · PresetStore · AutoStartService
         │  IAudioBackend
-Backends ── PulseBackend (+ PulseBoostRoute) │ PipeWireBackend │ WasapiBackend (+ LoopbackCapture) │ MockBackend
+Backends ── PulseBackend (+ PulseBoostRoute) │ PipeWireBackend │ WasapiBackend (+ APO · LoopbackCapture) │ MockBackend
 ```
 
 ### Linux
@@ -86,13 +96,23 @@ ganho nativo do servidor só faz clip seco. Adiciona ~40 ms de latência.
 
 ### Windows
 
-As APIs de volume do Windows param em 100%. Sem rota DSP, os sliders vão até
-100% (sessão via `ISimpleAudioVolume`, dispositivo e canais via
-`IAudioEndpointVolume`). Para passar disso, o LoudMixer usa a solução v1 do
-plano: os apps tocam num **cabo virtual** (VB-Audio Cable), o LoudMixer
-captura em loopback, aplica o DSP e reinjeta no dispositivo físico. Com a rota
-ativa, o volume das sessões vira pré-atenuador e o ganho real é aplicado no
-DSP. Passo a passo em [packaging/windows/README.md](packaging/windows/README.md).
+As APIs de volume do Windows param em 100% (sessão via `ISimpleAudioVolume`,
+dispositivo e canais via `IAudioEndpointVolume`). Para passar disso, o
+LoudMixer tem um **efeito de sistema (APO)** próprio, que o Windows carrega na
+cadeia de efeitos do dispositivo e que aplica o `GainProcessor` (soft-clip +
+medição) à mistura dos apps:
+
+- **Dispositivo e canais:** até 100% no volume do Windows, acima disso no APO.
+- **Apps:** o APO sobe pelo maior ganho pedido (B) e cada app é atenuado no
+  volume nativo para pedido/B.
+- O ganho fica salvo e o APO o reaplica quando o Windows o recria (reboot,
+  reconexão), mesmo com o app fechado.
+
+Por enquanto o APO é ativado com a ferramenta `loudmixer-apo-setup`. Onde ele
+não funciona, há a alternativa do **cabo virtual** (VB-Audio Cable): os apps
+tocam no cabo, o LoudMixer captura em loopback, aplica o DSP e reinjeta no
+dispositivo físico. Passo a passo em
+[packaging/windows/README.md](packaging/windows/README.md).
 
 ### Escala de ganho
 
@@ -197,16 +217,21 @@ dispositivo durante o teste de boost para não tocar um bipe alto.
 | `PulseFallback.{h,cpp}` | `PulseBackend.{h,cpp}` | Deixou de ser fallback |
 | WIL / WRL | `ComUtil.h` próprio | Compila também com MinGW |
 | MSVC + Visual Studio | **MSYS2 UCRT64** (GCC/MinGW + Qt 6), no VS Code | Não exige o Visual Studio; gratuito e sem conta. É o toolchain testado e o usado no CI |
+| Cabo virtual na v1, APO assinado na v2 | **APO próprio** (não assinado) já agora; cabo virtual como alternativa | O Windows carrega o APO sem assinatura; boost sem programa de terceiros nem troca da saída padrão |
 | Qt 6.5+ | Qt **6.4+** | Debian 12 traz 6.4.2; nenhuma API usada exige 6.5 |
 | `MixerWindow.ui` / QML | Qt Widgets em código | As linhas são dinâmicas (apps aparecem/somem); o slider é desenhado à mão |
 | Soft-clip em todo boost | Soft-clip só na **rota DSP** | O ganho nativo do Pulse/PipeWire > 100% é aplicado no servidor, fora do nosso alcance |
 
 ## Limitações conhecidas / próximos passos
 
-- **Windows**: uma rota de boost por vez; exige um cabo virtual e trocar a
-  saída padrão manualmente (trocar por código exige a API não documentada
-  `IPolicyConfig`). Volumes e sessões são lidos por varredura a cada 750 ms
-  (mais notificações de hot-plug). APO assinado fica para a v2, como previsto.
+- **Windows (APO)**: ainda é ativado pela linha de comando, como
+  administrador. O total por dispositivo é limitado a 200% (dispositivo × app).
+  Apps em modo RAW não passam pelo APO. Riscos acompanhados nas issues com a
+  label `risco`.
+- **Windows (cabo virtual)**: uma rota por vez; exige trocar a saída padrão
+  manualmente (trocar por código exige a API não documentada `IPolicyConfig`).
+- **Windows**: volumes e sessões são lidos por varredura a cada 750 ms (mais
+  notificações de hot-plug).
 - **Rota DSP no Linux**: se os relógios do sink virtual e do físico
   divergirem, o excesso é descartado para não acumular latência, o que pode
   gerar um estalo ocasional. Um resampler adaptativo resolveria.
@@ -222,10 +247,11 @@ dispositivo durante o teste de boost para não tocar um bipe alto.
 ```
 src/core/            IAudioBackend, GainProcessor (DSP puro), AudioSessionManager, PresetStore, AutoStartService
 src/backend/linux/   PulseBackend, PulseBoostRoute, PipeWireBackend
-src/backend/windows/ WasapiBackend, SessionEnumerator, LoopbackCapture, ComUtil.h
+src/backend/windows/ WasapiBackend, ApoRouteMath.h, SessionEnumerator, LoopbackCapture, ComUtil.h
+src/apo/             APO (loudmixer_apo.dll), loudmixer-apo-setup, interfaces e estado compartilhado
 src/backend/mock/    MockBackend
 src/ui/              TrayController, MixerWindow, ChannelsPanel, GainSlider, SettingsDialog, SingleInstance, GlobalHotkeys, AppIcons
-tests/               GainProcessorTest, MockBackendTest, PulseBackendLiveTest
+tests/               GainProcessorTest, MockBackendTest, ApoRouteMathTest, PulseBackendLiveTest; no Windows: ApoTest, WasapiApoLiveTest
 translations/        loudmixer_pt_BR.ts  (tools/fill_pt_BR.py aplica as traduções)
 resources/           ícones (tools/make_icons.py gera .ico/.png), .qrc, .rc
 packaging/           linux/ (AppImage, .desktop, Flatpak) · windows/ (NSIS via CPack)

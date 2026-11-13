@@ -646,6 +646,20 @@ std::vector<std::wstring> installedEndpoints()
     return out;
 }
 
+// O app (sem administrador) salva o ganho efetivo nesta chave para o APO
+// reaplicá-lo depois. Usuários autenticados podem ler e gravar valores só
+// nela; as subchaves (Backup) continuam só para administradores. Ver #11.
+void allowUsersToSaveGains(const Key& settings)
+{
+    PSECURITY_DESCRIPTOR sd = nullptr;
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            L"D:P(A;CI;KA;;;SY)(A;CI;KA;;;BA)(A;CI;KR;;;BU)(A;;0x20003;;;AU)", SDDL_REVISION_1, &sd, nullptr))
+        throw Failure{L"montar a ACL da chave de ajustes: " + errorText(GetLastError())};
+    const LONG rc = RegSetKeySecurity(settings.get(), DACL_SECURITY_INFORMATION, sd);
+    LocalFree(sd);
+    check(rc, L"ajustar a ACL de HKLM\\" + std::wstring(kApoSettingsKey));
+}
+
 void setInitialGain(const std::wstring& guid, DWORD percent)
 {
     Key k = Key::create(HKEY_LOCAL_MACHINE, kApoSettingsKey);
@@ -802,6 +816,7 @@ int cmdInstall(const std::wstring& target, const InstallOptions& opt)
         const std::wstring dll = deployDll();
         registerCom(dll);
         Key settings = Key::create(HKEY_LOCAL_MACHINE, kApoSettingsKey);
+        allowUsersToSaveGains(settings);
         settings.setDword(kDebugLogValue, opt.debugLog ? 1 : 0);
         if (opt.debugLog)
             ensureLogDir();
@@ -927,8 +942,11 @@ int cmdSetGain(const std::wstring& target, DWORD percent)
         throw Failure{L"APO não está carregado em " + ep.name};
     v.get()->gain.store(std::clamp(static_cast<float>(percent), 0.0f, 200.0f) / 100.0f);
     say(L"Ganho de " + ep.name + L" = " + std::to_wstring(percent) + L"%");
-    if (isElevated())
-        setInitialGain(ep.guid, percent);
+    // Também persiste (a chave aceita escrita de usuários após o install).
+    const DWORD saved = std::min<DWORD>(percent, 200);
+    if (RegSetKeyValueW(HKEY_LOCAL_MACHINE, kApoSettingsKey, ep.guid.c_str(), REG_DWORD, &saved, sizeof(saved))
+        != ERROR_SUCCESS)
+        say(L"  (aviso: não foi possível salvar no registro; vale até o áudio reiniciar)");
     return 0;
 }
 

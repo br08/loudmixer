@@ -9,6 +9,7 @@
 // ao sistema. Tudo que pode falhar acontece em Initialize/LockForProcess.
 
 #include "apo/ApoInterfaces.h"
+#include "apo/ApoRegistry.h"
 #include "apo/ApoShared.h"
 #include "core/GainProcessor.h"
 
@@ -101,13 +102,8 @@ bool isFloat32(const UNCOMPRESSEDAUDIOFORMAT& f)
 
 float initialGainFor(const std::wstring& guid)
 {
-    DWORD percent = 0;
-    DWORD size = sizeof(percent);
-    const auto key = normalizeEndpointGuid(guid);
-    if (RegGetValueW(HKEY_LOCAL_MACHINE, kApoSettingsKey, key.c_str(), RRF_RT_REG_DWORD, nullptr, &percent, &size)
-        != ERROR_SUCCESS)
-        return kDefaultGain;
-    return std::clamp(static_cast<float>(percent) / 100.0f, 0.0f, loudmixer::GainProcessor::kMaxGain);
+    const Persisted p = readPersisted(guid);
+    return p.found ? p.master : kDefaultGain;
 }
 
 std::wstring guidText(const GUID& g)
@@ -170,10 +166,14 @@ public:
         if (created) {
             // A memória vem zerada do sistema; preenche e publica o magic por último.
             s->version = kSharedVersion;
-            s->gain.store(initialGainFor(endpointGuid), std::memory_order_relaxed);
+            // Último estado salvo pelo app (ou pelo install): o boost continua
+            // valendo quando o Windows recria o APO, mesmo com o app fechado.
+            const Persisted saved = readPersisted(endpointGuid);
+            s->gain.store(saved.found ? saved.master : kDefaultGain, std::memory_order_relaxed);
             s->curve.store(static_cast<std::int32_t>(loudmixer::ClipCurve::Tanh), std::memory_order_relaxed);
-            for (auto& g : s->channelGains)
-                g.store(1.0f, std::memory_order_relaxed);
+            for (int c = 0; c < kSharedMaxChannels; ++c)
+                s->channelGains[c].store(c < static_cast<int>(saved.channels.size()) ? saved.channels[c] : 1.0f,
+                                         std::memory_order_relaxed);
             s->magic.store(kSharedMagic, std::memory_order_release);
         } else {
             // Outra instância está criando: espera ela publicar (fora do tempo real).

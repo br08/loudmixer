@@ -83,6 +83,10 @@
         <source>This audio backend does not support DSP processing.</source>
         <translation>Este backend de áudio não suporta processamento DSP.</translation>
     </message>
+    <message>
+        <source>This device already boosts above 100% through the LoudMixer system effect.</source>
+        <translation>Este dispositivo já passa de 100% pelo efeito de sistema do LoudMixer.</translation>
+    </message>
 </context>
 <context>
     <name>loudmixer::AudioSessionManager</name>

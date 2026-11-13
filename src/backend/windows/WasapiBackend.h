@@ -17,6 +17,14 @@
 //     100%, o DSP sobe pelo maior pedido (B) e cada sessão é atenuada para
 //     ganho/B — exatamente a "solução prática v1" do plano.
 //
+// Boost do sistema (APO do LoudMixer, instalado pelo loudmixer-apo-setup):
+// quando o APO está na cadeia de efeitos de um dispositivo, ele passa a ir
+// até 200% sem cabo virtual. Ganho efetivo = volume nativo × fator do APO
+// (ver ApoRouteMath.h); apps acima de 100% usam o mesmo esquema do B acima,
+// com o APO no lugar do DSP. O estado efetivo vai para a memória
+// compartilhada do APO na hora e para o registro (em lote), para o APO
+// reaplicá-lo quando o Windows o recriar.
+//
 // Todas as chamadas COM rodam numa thread dedicada (MTA). A UI só vê
 // snapshots, atualizados por notificações do IMMDeviceEnumerator e por uma
 // varredura periódica (volumes e sessões).
@@ -57,6 +65,7 @@ public:
 
     bool supportsProcessor(TargetKind kind) const override { return kind == TargetKind::Device; }
     bool attachProcessor(const Target& target, std::shared_ptr<GainProcessor> processor, std::string* error) override;
+    std::optional<ProcessorStats> takeDeviceStats(const std::string& deviceId) override;
 
     // "boostSource": nome (ou parte do nome) do endpoint usado como origem da
     // rota de boost. Vazio = detecta VB-Audio "CABLE Input", VoiceMeeter ou
@@ -73,6 +82,9 @@ private:
 
     void refresh();          // thread COM
     void applyRouteGains();  // thread COM
+    void applyApoGains(const std::string& deviceId); // thread COM
+    void detachApo(const std::string& deviceId);     // thread COM
+    void flushApoState();                            // thread COM: salva no registro
     void notify(ChangeKind kind, const std::string& id);
 
     std::unique_ptr<Impl> d_;

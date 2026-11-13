@@ -269,9 +269,9 @@ std::vector<std::string> AudioSessionManager::activeBoostRoutes() const
 std::optional<ProcessorStats> AudioSessionManager::takeStats(const std::string& deviceId)
 {
     auto it = processors_.find(deviceId);
-    if (it == processors_.end())
-        return std::nullopt;
-    return it->second->takeStats();
+    if (it != processors_.end())
+        return it->second->takeStats();
+    return backend_ && running_ ? backend_->takeDeviceStats(deviceId) : std::nullopt;
 }
 
 void AudioSessionManager::setClipCurve(ClipCurve curve)

@@ -130,6 +130,8 @@ PT_BR = {
         "Não foi possível acessar os dispositivos de áudio do Windows (IMMDeviceEnumerator).",
     "DSP boost is already active on another device (v1 supports one at a time).":
         "O Boost DSP já está ativo em outro dispositivo (a v1 suporta um por vez).",
+    "This device already boosts above 100% through the LoudMixer system effect.":
+        "Este dispositivo já passa de 100% pelo efeito de sistema do LoudMixer.",
     'No virtual output device found. Install VB-Audio Virtual Cable (free), set "CABLE Input" as the Windows default output and enable DSP boost again.':
         'Nenhum dispositivo de saída virtual encontrado. Instale o VB-Audio Virtual Cable (gratuito), defina "CABLE Input" como saída padrão do Windows e ative o Boost DSP novamente.',
     "This audio backend does not support DSP processing.": "Este backend de áudio não suporta processamento DSP.",
