@@ -66,6 +66,7 @@ public:
     bool supportsProcessor(TargetKind kind) const override { return kind == TargetKind::Device; }
     bool attachProcessor(const Target& target, std::shared_ptr<GainProcessor> processor, std::string* error) override;
     std::optional<ProcessorStats> takeDeviceStats(const std::string& deviceId) override;
+    SystemBoostResult setSystemBoost(const std::string& deviceId, bool enabled) override;
 
     // "boostSource": nome (ou parte do nome) do endpoint usado como origem da
     // rota de boost. Vazio = detecta VB-Audio "CABLE Input", VoiceMeeter ou
@@ -85,6 +86,7 @@ private:
     void applyApoGains(const std::string& deviceId); // thread COM
     void detachApo(const std::string& deviceId);     // thread COM
     void flushApoState();                            // thread COM: salva no registro
+    bool resetDeviceCom();                           // thread COM: após reinício do áudio
     void notify(ChangeKind kind, const std::string& id);
 
     std::unique_ptr<Impl> d_;

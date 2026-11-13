@@ -31,6 +31,10 @@ AudioSessionManager::AudioSessionManager(std::unique_ptr<IAudioBackend> backend,
 
 AudioSessionManager::~AudioSessionManager()
 {
+    // Um pedido de boost do sistema em andamento usa o backend: espera ele
+    // terminar (no pior caso, o usuário ainda está diante do UAC).
+    if (systemBoostThread_.joinable())
+        systemBoostThread_.join();
     stop();
 }
 
@@ -274,6 +278,34 @@ std::optional<ProcessorStats> AudioSessionManager::takeStats(const std::string& 
     return backend_ && running_ ? backend_->takeDeviceStats(deviceId) : std::nullopt;
 }
 
+bool AudioSessionManager::requestSystemBoost(const std::string& deviceId, bool enabled)
+{
+    if (!running_ || !systemBoostPending_.empty())
+        return false;
+    if (systemBoostThread_.joinable())
+        systemBoostThread_.join(); // pedido anterior já terminou
+    systemBoostPending_ = deviceId;
+    emit systemBoostPendingChanged();
+    QPointer<AudioSessionManager> self(this);
+    IAudioBackend* backend = backend_.get();
+    systemBoostThread_ = std::thread([self, backend, deviceId, enabled] {
+        const SystemBoostResult r = backend->setSystemBoost(deviceId, enabled);
+        QMetaObject::invokeMethod(
+            self,
+            [self, deviceId, enabled, r] {
+                if (!self)
+                    return;
+                self->systemBoostPending_.clear();
+                self->refresh();
+                emit self->systemBoostPendingChanged();
+                emit self->systemBoostFinished(QString::fromStdString(deviceId), enabled, static_cast<int>(r.code),
+                                               QString::fromStdString(r.detail));
+            },
+            Qt::QueuedConnection);
+    });
+    return true;
+}
+
 void AudioSessionManager::setClipCurve(ClipCurve curve)
 {
     curve_ = curve;
@@ -369,8 +401,20 @@ void AudioSessionManager::flushPending()
         devicesDirty_ = false;
         auto fresh = backend_->listDevices();
         if (fresh != devices_) {
+            // Boost do sistema que caiu por fora (não por pedido do usuário).
+            std::vector<std::string> lost;
+            for (const auto& d : fresh) {
+                const auto old = std::find_if(devices_.begin(), devices_.end(), [&](const auto& o) { return o.id == d.id; });
+                if (old != devices_.end() && old->systemBoostState == SystemBoostState::Active
+                    && (d.systemBoostState == SystemBoostState::EnhancementsOff
+                        || d.systemBoostState == SystemBoostState::RemovedExternally)
+                    && systemBoostPending_ != d.id)
+                    lost.push_back(d.id);
+            }
             devices_ = std::move(fresh);
             emit devicesChanged();
+            for (const auto& id : lost)
+                emit systemBoostLost(QString::fromStdString(id));
         }
     }
     if (sessionsDirty_) {

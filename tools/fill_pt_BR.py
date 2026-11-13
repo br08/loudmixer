@@ -135,6 +135,66 @@ PT_BR = {
     'No virtual output device found. Install VB-Audio Virtual Cable (free), set "CABLE Input" as the Windows default output and enable DSP boost again.':
         'Nenhum dispositivo de saída virtual encontrado. Instale o VB-Audio Virtual Cable (gratuito), defina "CABLE Input" como saída padrão do Windows e ative o Boost DSP novamente.',
     "This audio backend does not support DSP processing.": "Este backend de áudio não suporta processamento DSP.",
+    ' — click “Boost 200%” on a device to go above 100%':
+        ' — clique em “Boost 200%” num dispositivo para passar de 100%',
+    'Boost 200%':
+        'Boost 200%',
+    'Let this device, its channels and its apps go up to 200% (asks for administrator permission)':
+        'Deixa este dispositivo, os canais e os apps dele irem até 200% (pede permissão de administrador)',
+    'Boost on':
+        'Boost ligado',
+    'Boost up to 200% is on for this device. Click to turn it off.':
+        'O boost até 200% está ligado neste dispositivo. Clique para desligar.',
+    'Boost paused':
+        'Boost pausado',
+    'Audio enhancements were turned off for this device in the Windows settings, so the boost stopped. Click to turn it back on.':
+        'Os aprimoramentos de áudio deste dispositivo foram desligados nas configurações do Windows, e o boost parou. Clique para religar.',
+    'Boost removed':
+        'Boost removido',
+    'A driver or Windows update removed the boost from this device. Click to turn it back on.':
+        'Uma atualização de driver ou do Windows removeu o boost deste dispositivo. Clique para religar.',
+    'Turning off…':
+        'Desligando…',
+    'Turning on…':
+        'Ligando…',
+    'LoudMixer will add its audio effect to “%1” so it can go up to 200%.':
+        'O LoudMixer vai adicionar o efeito de áudio dele a “%1” para que ele possa ir até 200%.',
+    'Windows will ask for administrator permission.':
+        'O Windows vai pedir permissão de administrador.',
+    'The audio pauses for a few seconds.':
+        'O áudio para por alguns segundos.',
+    'Audio enhancements are turned on for this device.':
+        'Os aprimoramentos de áudio deste dispositivo são ligados.',
+    'This also turns on the effects already installed for it: %1.':
+        'Isso também liga os efeitos que já estão instalados para ele: %1.',
+    'Turn off the boost on “%1”? The device goes back to how it was before (up to 100%).':
+        'Desligar o boost em “%1”? O dispositivo volta a ser como era antes (até 100%).',
+    'Boost up to 200%':
+        'Boost até 200%',
+    'Turn off boost':
+        'Desligar boost',
+    'Windows does not run audio effects on “%1”, so the boost could not be turned on. The device was left as it was.\n\nAs an alternative, the virtual cable route can be turned on in Settings > Advanced.':
+        'O Windows não roda efeitos de áudio em “%1”, por isso o boost não pôde ser ligado. O dispositivo ficou como estava.\n\nComo alternativa, a rota por cabo virtual pode ser ligada em Configurações > Avançado.',
+    'The LoudMixer audio effect tool (loudmixer-apo-setup.exe) was not found. Reinstall LoudMixer.':
+        'A ferramenta do efeito de áudio do LoudMixer (loudmixer-apo-setup.exe) não foi encontrada. Reinstale o LoudMixer.',
+    'Could not turn on the boost on “%1”:\n%2':
+        'Não foi possível ligar o boost em “%1”:\n%2',
+    'Could not turn off the boost on “%1”:\n%2':
+        'Não foi possível desligar o boost em “%1”:\n%2',
+    'Advanced':
+        'Avançado',
+    'Show the virtual cable route (“DSP boost”) on devices':
+        'Mostrar a rota por cabo virtual (“Boost DSP”) nos dispositivos',
+    'Alternative way to go above 100% for devices where “Boost 200%” does not work. Needs a virtual audio cable (e.g. VB-Audio Cable) set as the Windows default output.':
+        'Outro jeito de passar de 100% em dispositivos onde o “Boost 200%” não funciona. Precisa de um cabo de áudio virtual (ex.: VB-Audio Cable) como saída padrão do Windows.',
+    'Audio enhancements were turned off for it in the Windows settings.':
+        'Os aprimoramentos de áudio dele foram desligados nas configurações do Windows.',
+    'A driver or Windows update removed it.':
+        'Uma atualização de driver ou do Windows o removeu.',
+    'Boost turned off on %1':
+        'Boost desligado em %1',
+    'Open LoudMixer to turn it back on.':
+        'Abra o LoudMixer para religar.',
 }
 
 

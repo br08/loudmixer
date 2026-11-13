@@ -17,6 +17,8 @@
 #include <QMessageBox>
 #include <QScrollArea>
 #include <QSettings>
+#include <QStringList>
+#include <QStyle>
 #include <QSystemTrayIcon>
 #include <QTabWidget>
 #include <QToolButton>
@@ -28,6 +30,17 @@
 namespace loudmixer::ui {
 
 namespace {
+
+// Windows: a rota por cabo virtual é opção avançada (o boost do sistema é o
+// caminho normal). No Linux, a rota DSP é o caminho do soft-clip: sempre visível.
+bool showCableRoute()
+{
+#ifdef Q_OS_WIN
+    return QSettings().value(keys::showCableRoute, false).toBool();
+#else
+    return true;
+#endif
+}
 constexpr int kLedIntervalMs = 33;  // ~30 Hz
 constexpr qint64 kClipHoldMs = 250; // LED fica aceso um pouco após o pico
 
@@ -77,6 +90,8 @@ MixerWindow::MixerWindow(AudioSessionManager* manager, PresetStore* presets, Aut
         channels_->sync();
     });
     connect(manager_, &AudioSessionManager::boostRouteChanged, this, [this] { syncDevices(); });
+    connect(manager_, &AudioSessionManager::systemBoostPendingChanged, this, [this] { syncDevices(); });
+    connect(manager_, &AudioSessionManager::systemBoostFinished, this, &MixerWindow::onSystemBoostFinished);
 
     ledTimer_.setInterval(kLedIntervalMs);
     connect(&ledTimer_, &QTimer::timeout, this, &MixerWindow::updateLeds);
@@ -230,14 +245,26 @@ void MixerWindow::syncDevices()
             const std::string id = d.id;
             connect(row, &GainSlider::gainChanged, this, [this, id](double g) { manager_->setGain(Target::device(id), g); });
             connect(row, &GainSlider::muteToggled, this, [this, id](bool m) { manager_->setMuted(Target::device(id), m); });
+            auto* extra = new QWidget(row);
+            auto* extraLayout = new QHBoxLayout(extra);
+            extraLayout->setContentsMargins(0, 0, 0, 0);
+            extraLayout->setSpacing(6);
+            // Boost do sistema (Windows: APO).
+            auto* sysBoost = new QToolButton(extra);
+            sysBoost->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+            sysBoost->hide();
+            connect(sysBoost, &QToolButton::clicked, this, [this, id] { onSystemBoostClicked(id); });
+            extraLayout->addWidget(sysBoost);
+            systemBoostButtons_[id] = sysBoost;
             if (canBoost) {
-                auto* box = new QCheckBox(tr("DSP boost"), row);
+                auto* box = new QCheckBox(tr("DSP boost"), extra);
                 box->setToolTip(tr("Route this device through LoudMixer's DSP: real boost up to 200% with soft-clipping "
                                    "and a clipping indicator (adds a few milliseconds of latency)"));
                 connect(box, &QCheckBox::toggled, this, [this, id](bool on) { toggleBoost(id, on); });
-                row->setExtraWidget(box);
+                extraLayout->addWidget(box);
                 boostBoxes_[id] = box;
             }
+            row->setExtraWidget(extra);
         }
         const bool routed = manager_->boostRouteActive(d.id);
         // Com boost do sistema (APO), o LED mostra o soft-clip dele.
@@ -254,12 +281,17 @@ void MixerWindow::syncDevices()
         if (auto box = boostBoxes_.find(d.id); box != boostBoxes_.end()) {
             const QSignalBlocker block(box->second);
             box->second->setChecked(routed);
-            // O dispositivo já tem boost do sistema: a rota DSP seria redundante.
-            box->second->setVisible(!d.systemBoost || routed);
+            // Com boost do sistema a rota DSP é redundante; no Windows ela só
+            // aparece se ativada nas configurações avançadas (ou se já estiver ativa).
+            box->second->setVisible((showCableRoute() && !d.systemBoost) || routed);
         }
+        if (auto btn = systemBoostButtons_.find(d.id); btn != systemBoostButtons_.end())
+            updateSystemBoostButton(btn->second, d);
     }
     for (auto it = boostBoxes_.begin(); it != boostBoxes_.end();)
         it = alive.count(it->first) ? std::next(it) : boostBoxes_.erase(it);
+    for (auto it = systemBoostButtons_.begin(); it != systemBoostButtons_.end();)
+        it = alive.count(it->first) ? std::next(it) : systemBoostButtons_.erase(it);
     dropMissing(deviceRows_, alive);
 
     for (const auto& d : devices)
@@ -272,8 +304,13 @@ void MixerWindow::syncDevices()
         ledTimer_.stop();
 
     QString status = tr("Audio backend: %1").arg(manager_->backendName());
-    if (!devices.empty() && manager_->maxGain(Target::device(manager_->defaultDeviceId())) <= 1.0)
-        status += tr(" — enable “DSP boost” on a device to go above 100%");
+    if (const auto def = manager_->device(manager_->defaultDeviceId());
+        def && manager_->maxGain(Target::device(def->id)) <= 1.0) {
+        if (def->systemBoostState != SystemBoostState::Unsupported)
+            status += tr(" — click “Boost 200%” on a device to go above 100%");
+        else if (showCableRoute())
+            status += tr(" — enable “DSP boost” on a device to go above 100%");
+    }
     status_->setText(status);
     muteAll_->blockSignals(true);
     muteAll_->setChecked(manager_->allMuted());
@@ -298,6 +335,107 @@ void MixerWindow::updateLeds()
             clipHoldUntil_[d.id] = now + kClipHoldMs;
         row->second->setLedState(now < clipHoldUntil_[d.id] ? ClipLed::State::Clipping : ClipLed::State::Active);
     }
+}
+
+void MixerWindow::updateSystemBoostButton(QToolButton* button, const AudioDevice& d)
+{
+    const std::string pending = manager_->systemBoostPending();
+    const QIcon shield = style()->standardIcon(QStyle::SP_VistaShield); // pede administrador
+    const QIcon warning = style()->standardIcon(QStyle::SP_MessageBoxWarning);
+    switch (d.systemBoostState) {
+    case SystemBoostState::Unsupported:
+        button->hide();
+        return;
+    case SystemBoostState::Off:
+        button->setIcon(shield);
+        button->setText(tr("Boost 200%"));
+        button->setToolTip(tr("Let this device, its channels and its apps go up to 200% "
+                              "(asks for administrator permission)"));
+        break;
+    case SystemBoostState::Active:
+        button->setIcon(shield);
+        button->setText(tr("Boost on"));
+        button->setToolTip(tr("Boost up to 200% is on for this device. Click to turn it off."));
+        break;
+    case SystemBoostState::EnhancementsOff:
+        button->setIcon(warning);
+        button->setText(tr("Boost paused"));
+        button->setToolTip(tr("Audio enhancements were turned off for this device in the Windows settings, so the "
+                              "boost stopped. Click to turn it back on."));
+        break;
+    case SystemBoostState::RemovedExternally:
+        button->setIcon(warning);
+        button->setText(tr("Boost removed"));
+        button->setToolTip(tr("A driver or Windows update removed the boost from this device. "
+                              "Click to turn it back on."));
+        break;
+    }
+    if (pending == d.id)
+        button->setText(d.systemBoost ? tr("Turning off…") : tr("Turning on…"));
+    button->setEnabled(pending.empty());
+    button->show();
+}
+
+void MixerWindow::onSystemBoostClicked(const std::string& deviceId)
+{
+    const auto d = manager_->device(deviceId);
+    if (!d)
+        return;
+    const QString name = QString::fromStdString(d->description);
+    const bool enable = d->systemBoostState != SystemBoostState::Active;
+    QString text;
+    if (enable) {
+        text = tr("LoudMixer will add its audio effect to “%1” so it can go up to 200%.").arg(name);
+        text += QStringLiteral("\n\n• ") + tr("Windows will ask for administrator permission.");
+        text += QStringLiteral("\n• ") + tr("The audio pauses for a few seconds.");
+        text += QStringLiteral("\n• ") + tr("Audio enhancements are turned on for this device.");
+        if (!d->deviceEffects.empty()) {
+            QStringList effects;
+            for (const auto& e : d->deviceEffects)
+                effects << QString::fromStdString(e);
+            text += QStringLiteral("\n• ") + tr("This also turns on the effects already installed for it: %1.")
+                                                   .arg(effects.join(QStringLiteral(", ")));
+        }
+    } else {
+        text = tr("Turn off the boost on “%1”? The device goes back to how it was before (up to 100%).").arg(name);
+        text += QStringLiteral("\n\n• ") + tr("Windows will ask for administrator permission.");
+        text += QStringLiteral("\n• ") + tr("The audio pauses for a few seconds.");
+    }
+    const auto answer = QMessageBox::question(this, enable ? tr("Boost up to 200%") : tr("Turn off boost"), text,
+                                              QMessageBox::Ok | QMessageBox::Cancel, QMessageBox::Ok);
+    if (answer == QMessageBox::Ok)
+        manager_->requestSystemBoost(deviceId, enable);
+}
+
+void MixerWindow::onSystemBoostFinished(const QString& deviceId, bool enabled, int code, const QString& detail)
+{
+    const auto d = manager_->device(deviceId.toStdString());
+    const QString name = d ? QString::fromStdString(d->description) : deviceId;
+    switch (static_cast<SystemBoostResult::Code>(code)) {
+    case SystemBoostResult::Code::Ok:
+    case SystemBoostResult::Code::Cancelled:
+        break;
+    case SystemBoostResult::Code::NoWorkingStage:
+        QMessageBox::information(
+            this, tr("Boost up to 200%"),
+            tr("Windows does not run audio effects on “%1”, so the boost could not be turned on. "
+               "The device was left as it was.\n\nAs an alternative, the virtual cable route can be turned on "
+               "in Settings > Advanced.")
+                .arg(name));
+        break;
+    case SystemBoostResult::Code::Unsupported:
+        QMessageBox::warning(this, tr("Boost up to 200%"),
+                             tr("The LoudMixer audio effect tool (loudmixer-apo-setup.exe) was not found. "
+                                "Reinstall LoudMixer."));
+        break;
+    case SystemBoostResult::Code::Failed:
+        QMessageBox::warning(this, tr("Boost up to 200%"),
+                             (enabled ? tr("Could not turn on the boost on “%1”:\n%2")
+                                      : tr("Could not turn off the boost on “%1”:\n%2"))
+                                 .arg(name, detail));
+        break;
+    }
+    syncDevices();
 }
 
 void MixerWindow::toggleBoost(const std::string& deviceId, bool enabled)
@@ -361,8 +499,10 @@ void MixerWindow::openSettings()
 {
     showAndRaise();
     SettingsDialog dlg(autostart_, this);
-    if (dlg.exec() == QDialog::Accepted)
+    if (dlg.exec() == QDialog::Accepted) {
         emit settingsChanged();
+        syncDevices(); // a opção da rota por cabo virtual pode ter mudado
+    }
 }
 
 void MixerWindow::toggleVisible()

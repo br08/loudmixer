@@ -224,19 +224,40 @@ void MockBackend::removeSession(const std::string& id)
     emit(ChangeKind::SessionRemoved, id);
 }
 
-void MockBackend::setSystemBoost(const std::string& deviceId, bool enabled, ProcessorStats stats)
+void MockBackend::simulateSystemBoost(const std::string& deviceId, SystemBoostState state, ProcessorStats stats)
 {
     {
         std::lock_guard lock(mutex_);
-        for (auto& d : devices_)
-            if (d.id == deviceId)
-                d.systemBoost = enabled;
-        if (enabled)
+        for (auto& d : devices_) {
+            if (d.id != deviceId)
+                continue;
+            d.systemBoostState = state;
+            d.systemBoost = state == SystemBoostState::Active;
+        }
+        if (state == SystemBoostState::Active)
             systemStats_[deviceId] = stats;
         else
             systemStats_.erase(deviceId);
     }
     emit(ChangeKind::DeviceChanged, deviceId);
+}
+
+void MockBackend::setSystemBoostResult(SystemBoostResult result)
+{
+    std::lock_guard lock(mutex_);
+    systemBoostResult_ = std::move(result);
+}
+
+SystemBoostResult MockBackend::setSystemBoost(const std::string& deviceId, bool enabled)
+{
+    SystemBoostResult r;
+    {
+        std::lock_guard lock(mutex_);
+        r = systemBoostResult_;
+    }
+    if (r.code == SystemBoostResult::Code::Ok)
+        simulateSystemBoost(deviceId, enabled ? SystemBoostState::Active : SystemBoostState::Off);
+    return r;
 }
 
 std::optional<ProcessorStats> MockBackend::takeDeviceStats(const std::string& deviceId)

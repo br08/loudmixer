@@ -44,7 +44,7 @@ if(WIN32)
         apo/ApoShared.h
     )
     target_compile_definitions(loudmixer_core PRIVATE LOUDMIXER_HAVE_WASAPI UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
-    target_link_libraries(loudmixer_core PUBLIC ole32 oleaut32 uuid avrt advapi32)
+    target_link_libraries(loudmixer_core PUBLIC ole32 oleaut32 uuid avrt advapi32 shell32)
 elseif(UNIX AND NOT APPLE)
     find_package(PkgConfig REQUIRED)
     if(LOUDMIXER_WITH_PULSE)

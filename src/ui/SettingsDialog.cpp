@@ -42,14 +42,26 @@ SettingsDialog::SettingsDialog(AutoStartService* autostart, QWidget* parent)
     curve_->setCurrentIndex(curve_->findData(s.value(keys::clipCurve, static_cast<int>(ClipCurve::Tanh)).toInt()));
     curve_->setToolTip(tr("How peaks above 0 dBFS are limited when DSP boost is active"));
     audioForm->addRow(tr("Clipping curve:"), curve_);
+    layout->addWidget(audio);
+
 #ifdef Q_OS_WIN
+    // --- Avançado: rota por cabo virtual ------------------------------------
+    auto* advanced = new QGroupBox(tr("Advanced"), this);
+    auto* advancedForm = new QFormLayout(advanced);
+    showCableRoute_ = new QCheckBox(tr("Show the virtual cable route (“DSP boost”) on devices"), this);
+    showCableRoute_->setToolTip(tr("Alternative way to go above 100% for devices where “Boost 200%” does not work. "
+                                   "Needs a virtual audio cable (e.g. VB-Audio Cable) set as the Windows default output."));
+    showCableRoute_->setChecked(s.value(keys::showCableRoute, false).toBool());
+    advancedForm->addRow(showCableRoute_);
     boostSource_ = new QLineEdit(this);
     boostSource_->setPlaceholderText(tr("auto (CABLE Input, VoiceMeeter, ...)"));
     boostSource_->setText(s.value(keys::boostSource).toString());
     boostSource_->setToolTip(tr("Virtual output device whose audio is captured and boosted"));
-    audioForm->addRow(tr("Boost source device:"), boostSource_);
+    boostSource_->setEnabled(showCableRoute_->isChecked());
+    connect(showCableRoute_, &QCheckBox::toggled, boostSource_, &QLineEdit::setEnabled);
+    advancedForm->addRow(tr("Boost source device:"), boostSource_);
+    layout->addWidget(advanced);
 #endif
-    layout->addWidget(audio);
 
     // --- Inicialização -------------------------------------------------------
     auto* startup = new QGroupBox(tr("Startup"), this);
@@ -107,6 +119,8 @@ void SettingsDialog::accept()
     s.setValue(keys::globalHotkeys, hotkeys_->isChecked());
     if (boostSource_)
         s.setValue(keys::boostSource, boostSource_->text().trimmed());
+    if (showCableRoute_)
+        s.setValue(keys::showCableRoute, showCableRoute_->isChecked());
 
     const QString oldLang = s.value(keys::language).toString();
     const QString newLang = language_->currentData().toString();

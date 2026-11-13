@@ -56,6 +56,15 @@ struct ChannelInfo {
 // Dispositivo de saída físico (ou lógico). O ganho mestre segue a convenção
 // do PulseAudio/WASAPI: mestre = maior ganho entre os canais; alterar o mestre
 // escala todos os canais preservando o balanço.
+// Boost do sistema por dispositivo (Windows: APO do LoudMixer).
+enum class SystemBoostState {
+    Unsupported,       // plataforma/instalação sem boost do sistema
+    Off,               // disponível, não ativado
+    Active,            // ativo: dispositivo, canais e apps vão até 200%
+    EnhancementsOff,   // instalado, mas os "aprimoramentos de áudio" foram desligados no Windows
+    RemovedExternally, // estava ativo e saiu por fora (atualização de driver ou do Windows)
+};
+
 struct AudioDevice {
     std::string id;
     std::string name;         // nome técnico (ex.: alsa_output.pci-...)
@@ -66,7 +75,11 @@ struct AudioDevice {
     std::vector<ChannelInfo> channels;
     // O caminho de áudio do sistema já aplica boost acima de 100% com
     // soft-clip (APO do LoudMixer no Windows): não precisa de rota DSP própria.
+    // Equivale a systemBoostState == Active.
     bool systemBoost = false;
+    SystemBoostState systemBoostState = SystemBoostState::Unsupported;
+    // Efeitos do fabricante na cadeia do dispositivo (ligam junto com o boost).
+    std::vector<std::string> deviceEffects;
 
     bool operator==(const AudioDevice&) const = default;
 };

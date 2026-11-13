@@ -660,10 +660,14 @@ void allowUsersToSaveGains(const Key& settings)
     check(rc, L"ajustar a ACL de HKLM\\" + std::wstring(kApoSettingsKey));
 }
 
+// Ganho inicial do install. Zera o estado salvo pelo app (B dos apps e
+// fatores por canal) de uma ativação anterior: ele não vale mais.
 void setInitialGain(const std::wstring& guid, DWORD percent)
 {
     Key k = Key::create(HKEY_LOCAL_MACHINE, kApoSettingsKey);
     k.setDword(guid, percent);
+    k.remove(guid + L".appboost");
+    k.remove(guid + L".channels");
 }
 
 // --- Comandos -----------------------------------------------------------------------------
@@ -785,8 +789,11 @@ void cleanupIfUnused()
 void detachEndpoint(const std::wstring& guid)
 {
     restoreValues(guid);
-    if (auto k = Key::tryOpen(HKEY_LOCAL_MACHINE, kApoSettingsKey, KEY_SET_VALUE))
+    if (auto k = Key::tryOpen(HKEY_LOCAL_MACHINE, kApoSettingsKey, KEY_SET_VALUE)) {
         k->remove(guid);
+        k->remove(guid + L".appboost");
+        k->remove(guid + L".channels");
+    }
 }
 
 constexpr int kExitNoWorkingStage = 3;

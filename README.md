@@ -47,13 +47,16 @@ README descreve o que foi implementado, como compilar e o que ainda falta.
   picos. O `WasapiApoLiveTest` confirmou dispositivo, canal e app chegando ao
   APO, o limite de 200% e o estado salvo no registro sem administrador. O
   `uninstall` restaurou o dispositivo exatamente como estava.
+- **Boost pelo app no Windows real**: os botões ligam e desligam o APO (com
+  UAC) e indicam quando os aprimoramentos de áudio são desligados nas
+  configurações do Windows, com notificação; o app continua funcionando
+  depois de cada reinício dos serviços de áudio. Conferido visualmente: slider
+  até 200%, LED ativo e opção do cabo virtual escondida.
 - **Cabo virtual** (VB-Audio Cable): testado manualmente no Windows real.
 
 ### O que NÃO foi verificado
 
 - Build com **MSVC** (o toolchain do Windows é o MinGW do MSYS2).
-- A janela do mixer no Windows não foi conferida visualmente: o app foi
-  testado minimizado na bandeja e pelos comandos.
 - O instalador NSIS foi gerado, mas não executado.
 - O CI (`.github/workflows/ci.yml`) ainda não rodou no GitHub.
 - **APO** num alto-falante com efeitos do fabricante no estágio EFX (só foi
@@ -108,8 +111,9 @@ medição) à mistura dos apps:
 - O ganho fica salvo e o APO o reaplica quando o Windows o recria (reboot,
   reconexão), mesmo com o app fechado.
 
-Por enquanto o APO é ativado com a ferramenta `loudmixer-apo-setup`. Onde ele
-não funciona, há a alternativa do **cabo virtual** (VB-Audio Cable): os apps
+O APO é ativado por dispositivo no próprio app (botão **Boost 200%**, com
+permissão de administrador). Onde ele não funciona, há a alternativa do **cabo
+virtual** (VB-Audio Cable), em *Configurações > Avançado*: os apps
 tocam no cabo, o LoudMixer captura em loopback, aplica o DSP e reinjeta no
 dispositivo físico. Passo a passo em
 [packaging/windows/README.md](packaging/windows/README.md).
@@ -224,8 +228,9 @@ dispositivo durante o teste de boost para não tocar um bipe alto.
 
 ## Limitações conhecidas / próximos passos
 
-- **Windows (APO)**: ainda é ativado pela linha de comando, como
-  administrador. O total por dispositivo é limitado a 200% (dispositivo × app).
+- **Windows (APO)**: ativar e desativar pede permissão de administrador e
+  reinicia o áudio do sistema por alguns segundos. O total por dispositivo é
+  limitado a 200% (dispositivo × app).
   Apps em modo RAW não passam pelo APO. Riscos acompanhados nas issues com a
   label `risco`.
 - **Windows (cabo virtual)**: uma rota por vez; exige trocar a saída padrão

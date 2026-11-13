@@ -11,6 +11,7 @@
 #include <endpointvolume.h>
 #include <mmdeviceapi.h>
 #include <propsys.h>
+#include <shellapi.h>
 
 #include <algorithm>
 #include <atomic>
@@ -32,6 +33,17 @@ namespace {
 const PROPERTYKEY kFriendlyName = {{0xa45c254e, 0xdf1c, 0x4efd, {0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0}}, 14};
 
 constexpr auto kPollInterval = std::chrono::milliseconds(750);
+
+// loudmixer-apo-setup.exe fica ao lado do executável do app.
+std::wstring setupToolPath()
+{
+    wchar_t path[MAX_PATH];
+    const DWORD n = GetModuleFileNameW(nullptr, path, MAX_PATH);
+    std::wstring p(path, n);
+    return p.substr(0, p.find_last_of(L"\\/") + 1) + L"loudmixer-apo-setup.exe";
+}
+
+bool fileExists(const std::wstring& path) { return GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES; }
 
 std::string channelName(UINT count, UINT index)
 {
@@ -145,6 +157,7 @@ struct WasapiBackend::Impl {
         bool cannotPersist = false;
     };
     std::map<std::string, ApoDevice> apo; // id do endpoint -> estado
+    bool setupToolAvailable = false;
 
     // Lido pela thread da UI (LED) via takeDeviceStats.
     struct StatsSource {
@@ -259,6 +272,7 @@ void WasapiBackend::workerLoop(std::string* startError, int* startState)
 
     d_->notifier = new NotificationClient([this] { post([this] { refresh(); }); });
     d_->enumerator->RegisterEndpointNotificationCallback(d_->notifier);
+    d_->setupToolAvailable = fileExists(setupToolPath());
 
     refresh();
     signalStart(1);
@@ -307,8 +321,13 @@ void WasapiBackend::workerLoop(std::string* startError, int* startState)
 void WasapiBackend::refresh()
 {
     ComPtr<IMMDeviceCollection> collection;
-    if (FAILED(d_->enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, collection.put())))
-        return;
+    if (FAILED(d_->enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, collection.put()))) {
+        // Os serviços de áudio do Windows reiniciaram (ex.: ativar o boost
+        // do sistema): o enumerador antigo não responde mais.
+        if (!resetDeviceCom()
+            || FAILED(d_->enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, collection.put())))
+            return;
+    }
 
     std::string defaultId;
     {
@@ -365,9 +384,16 @@ void WasapiBackend::refresh()
             float master = 1.0f;
             BOOL mute = FALSE;
             UINT channels = 0;
-            entry.volume->GetMasterVolumeLevelScalar(&master);
-            entry.volume->GetMute(&mute);
-            entry.volume->GetChannelCount(&channels);
+            if (FAILED(entry.volume->GetMasterVolumeLevelScalar(&master))) {
+                // Objeto de antes de um reinício do áudio: ativa de novo.
+                entry.volume.reset();
+                if (SUCCEEDED(dev->Activate(__uuidof(IAudioEndpointVolume), CLSCTX_ALL, nullptr, entry.volume.putVoid())))
+                    entry.volume->GetMasterVolumeLevelScalar(&master);
+            }
+            if (entry.volume) {
+                entry.volume->GetMute(&mute);
+                entry.volume->GetChannelCount(&channels);
+            }
             d.gain = master;
             d.muted = mute != FALSE;
             for (UINT c = 0; c < channels; ++c) {
@@ -382,9 +408,23 @@ void WasapiBackend::refresh()
                 d.channels[c].gain = d_->routeChannelGains[c];
         }
 
-        // Boost do sistema: o APO do LoudMixer está na cadeia deste dispositivo?
+        // Boost do sistema: o APO do LoudMixer está na cadeia deste dispositivo
+        // e os aprimoramentos de áudio estão ligados?
         Impl::ApoDevice* apoDev = nullptr;
-        if (const std::wstring guid = apo::normalizeEndpointGuid(win::toWide(id)); apo::isAttached(guid)) {
+        const std::wstring guid = apo::normalizeEndpointGuid(win::toWide(id));
+        const bool attached = apo::isAttached(guid);
+        const bool enhancementsOff = attached && apo::enhancementsDisabled(guid);
+        if (attached && !enhancementsOff)
+            d.systemBoostState = SystemBoostState::Active;
+        else if (attached)
+            d.systemBoostState = SystemBoostState::EnhancementsOff;
+        else if (apo::hasBackup(guid))
+            d.systemBoostState = SystemBoostState::RemovedExternally;
+        else
+            d.systemBoostState = d_->setupToolAvailable ? SystemBoostState::Off : SystemBoostState::Unsupported;
+        for (const auto& name : apo::otherEffects(guid))
+            d.deviceEffects.push_back(toUtf8(name.c_str()));
+        if (d.systemBoostState == SystemBoostState::Active) {
             auto [it, isNew] = d_->apo.try_emplace(id);
             apoDev = &it->second;
             if (!apoDev->view || !*apoDev->view) {
@@ -423,7 +463,9 @@ void WasapiBackend::refresh()
             for (std::size_t c = 0; c < d.channels.size(); ++c)
                 d.channels[c].gain = apoRoute::combine(d.channels[c].gain, apoDev->channelFactors[c]);
         } else if (d_->apo.count(id)) {
-            detachApo(id); // removido por fora (driver atualizado, uninstall...)
+            // Saiu da cadeia ou os aprimoramentos foram desligados: o APO não
+            // processa mais o áudio deste dispositivo.
+            detachApo(id);
         }
         devices.push_back(d);
 
@@ -540,6 +582,84 @@ void WasapiBackend::refresh()
     for (const auto& id : apoToApply)
         applyApoGains(id);
     flushApoState();
+}
+
+// Recria o enumerador (e o registro de notificações) depois que os serviços de
+// áudio do Windows reiniciaram. Os objetos COM antigos ficam inválidos.
+bool WasapiBackend::resetDeviceCom()
+{
+    if (d_->enumerator && d_->notifier)
+        d_->enumerator->UnregisterEndpointNotificationCallback(d_->notifier);
+    d_->enumerator.reset();
+    d_->devices.clear();
+    d_->sessions.clear();
+    if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
+                                d_->enumerator.putVoid())))
+        return false;
+    d_->enumerator->RegisterEndpointNotificationCallback(d_->notifier);
+    return true;
+}
+
+// Roda o loudmixer-apo-setup elevado (UAC) e espera. Não toca no estado do
+// backend além de pedir uma recriação dos objetos COM ao final, porque os
+// serviços de áudio reiniciam durante o install/uninstall.
+SystemBoostResult WasapiBackend::setSystemBoost(const std::string& deviceId, bool enabled)
+{
+    using Code = SystemBoostResult::Code;
+    SystemBoostResult r;
+    const std::wstring tool = setupToolPath();
+    if (!fileExists(tool)) {
+        r.code = Code::Unsupported;
+        return r;
+    }
+    wchar_t tmp[MAX_PATH];
+    GetTempPathW(MAX_PATH, tmp);
+    const std::wstring log = std::wstring(tmp) + L"loudmixer-apo-setup-" + std::to_wstring(GetCurrentProcessId()) + L".log";
+    DeleteFileW(log.c_str());
+    const std::wstring params = std::wstring(enabled ? L"install " : L"uninstall ")
+        + apo::normalizeEndpointGuid(win::toWide(deviceId)) + L" --log \"" + log + L"\"";
+
+    SHELLEXECUTEINFOW sei{};
+    sei.cbSize = sizeof(sei);
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI;
+    sei.lpVerb = L"runas";
+    sei.lpFile = tool.c_str();
+    sei.lpParameters = params.c_str();
+    sei.nShow = SW_HIDE;
+    if (!ShellExecuteExW(&sei) || !sei.hProcess) {
+        const DWORD e = GetLastError();
+        r.code = e == ERROR_CANCELLED ? Code::Cancelled : Code::Failed;
+        r.detail = "ShellExecuteEx failed (" + std::to_string(e) + ")";
+        return r;
+    }
+    WaitForSingleObject(sei.hProcess, INFINITE);
+    DWORD exitCode = 1;
+    GetExitCodeProcess(sei.hProcess, &exitCode);
+    CloseHandle(sei.hProcess);
+
+    // A ferramenta escreve "ERRO: ..." no log quando falha.
+    std::string text;
+    if (FILE* f = _wfopen(log.c_str(), L"rb")) {
+        char buf[4096];
+        size_t n;
+        while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0)
+            text.append(buf, n);
+        std::fclose(f);
+    }
+    DeleteFileW(log.c_str());
+    if (const auto pos = text.rfind("ERRO: "); pos != std::string::npos) {
+        r.detail = text.substr(pos + 6);
+        r.detail.erase(r.detail.find_last_not_of("\r\n ") + 1);
+    }
+    r.code = exitCode == 0 ? Code::Ok : exitCode == 3 ? Code::NoWorkingStage : Code::Failed;
+    if (r.code == Code::Failed && r.detail.empty())
+        r.detail = "loudmixer-apo-setup exit code " + std::to_string(exitCode);
+
+    post([this] {
+        resetDeviceCom();
+        refresh();
+    });
+    return r;
 }
 
 // Boost do sistema: distribui o ganho entre as sessões (pré-atenuação) e o

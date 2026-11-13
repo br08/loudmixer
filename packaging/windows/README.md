@@ -98,9 +98,21 @@ de efeitos do dispositivo e que aplica o ganho, com soft-clip, à mistura dos
 apps. Com o APO num dispositivo, os sliders do dispositivo, dos canais e dos
 apps que tocam nele vão até 200%, sem cabo virtual e sem trocar a saída padrão.
 
-Por enquanto, o APO é ativado pela ferramenta `loudmixer-apo-setup`, que fica
-ao lado do `loudmixer.exe` na pasta de build. O botão no app e a integração com
-o instalador estão planejados na issue #1.
+No LoudMixer, aba **Dispositivos**, o botão **Boost 200%** de cada dispositivo
+ativa o APO (o Windows pede permissão de administrador). O mesmo botão mostra o
+estado e desativa o boost:
+
+| Botão | Significado |
+|---|---|
+| **Boost 200%** | disponível; clique para ativar |
+| **Boost ligado** | ativo; clique para desativar |
+| **Boost pausado** | os aprimoramentos de áudio do dispositivo foram desligados nas configurações do Windows; clique para religar |
+| **Boost removido** | uma atualização de driver ou do Windows tirou o APO do dispositivo; clique para religar |
+
+Quando o boost cai por fora, o LoudMixer também avisa com uma notificação.
+
+O botão usa a ferramenta `loudmixer-apo-setup`, que fica ao lado do
+`loudmixer.exe` e também pode ser usada direto, como administrador:
 
 ```powershell
 loudmixer-apo-setup list              # dispositivos e estado do APO
@@ -119,7 +131,9 @@ loudmixer-apo-setup uninstall all     # remove e restaura os dispositivos
 - O `uninstall` restaura os valores originais do dispositivo, guardados no
   `install`.
 
-Os riscos conhecidos dessa abordagem estão nas issues com a label `risco`.
+Se o Windows não rodar efeitos de áudio no dispositivo, o LoudMixer avisa e
+deixa o dispositivo como estava. Os riscos conhecidos dessa abordagem estão nas
+issues com a label `risco`.
 
 ### Alternativa: cabo virtual
 
@@ -129,8 +143,11 @@ esse áudio (loopback), aplica o ganho com soft-clip e o reinjeta no dispositivo
 real.
 
 1. Instale o [VB-Audio Virtual Cable](https://vb-audio.com/Cable/) (gratuito).
-2. Em *Configurações > Som*, defina **CABLE Input** como saída padrão.
-3. No LoudMixer, aba **Dispositivos**, marque **Boost DSP** no seu fone/caixa.
+2. Em *Configurações > Som* do Windows, defina **CABLE Input** como saída padrão.
+3. Nas configurações do LoudMixer, em **Avançado**, ligue **Mostrar a rota por
+   cabo virtual**.
+4. Na aba **Dispositivos**, marque **Boost DSP** no seu fone/caixa.
 
-Outro cabo virtual pode ser escolhido em *Configurações > Dispositivo de
-origem do boost*. Em dispositivos com o APO, a opção **Boost DSP** não aparece.
+Outro cabo virtual pode ser escolhido no campo *Dispositivo de origem do boost*,
+também em **Avançado**. Em dispositivos com o APO ativo, a opção **Boost DSP**
+não aparece.

@@ -54,6 +54,64 @@ inline bool isAttached(const std::wstring& endpointGuid)
     return false;
 }
 
+// Houve um install do LoudMixer neste dispositivo (o uninstall apaga o
+// backup). Com o APO fora da cadeia, indica que ele foi removido por fora.
+inline bool hasBackup(const std::wstring& endpointGuid)
+{
+    const std::wstring path = std::wstring(kApoSettingsKey) + L"\\Backup\\" + normalizeEndpointGuid(endpointGuid);
+    HKEY k = nullptr;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, path.c_str(), 0, KEY_READ, &k) != ERROR_SUCCESS)
+        return false;
+    RegCloseKey(k);
+    return true;
+}
+
+// "Aprimoramentos de áudio" desligados no Windows (PKEY_AudioEndpoint_Disable_SysFx):
+// o Windows não roda nenhum APO no dispositivo.
+inline bool enhancementsDisabled(const std::wstring& endpointGuid)
+{
+    const std::wstring path = kRenderRoot + normalizeEndpointGuid(endpointGuid) + L"\\FxProperties";
+    DWORD v = 0, size = sizeof(v);
+    return RegGetValueW(HKEY_LOCAL_MACHINE, path.c_str(), L"{1da5d803-d492-4edd-8c23-e0c0ffee7f0e},5",
+                        RRF_RT_REG_DWORD, nullptr, &v, &size)
+            == ERROR_SUCCESS
+        && v != 0;
+}
+
+// Nomes dos outros efeitos (do fabricante ou do Windows) na cadeia do
+// dispositivo: eles também passam a rodar quando o boost liga os
+// aprimoramentos.
+inline std::vector<std::wstring> otherEffects(const std::wstring& endpointGuid)
+{
+    std::vector<std::wstring> names;
+    const std::wstring path = kRenderRoot + normalizeEndpointGuid(endpointGuid) + L"\\FxProperties";
+    for (const wchar_t* value : kCompositeFxValues) {
+        DWORD size = 0;
+        if (RegGetValueW(HKEY_LOCAL_MACHINE, path.c_str(), value, RRF_RT_REG_MULTI_SZ, nullptr, nullptr, &size)
+            != ERROR_SUCCESS)
+            continue;
+        std::vector<wchar_t> buf(size / sizeof(wchar_t) + 2, L'\0');
+        if (RegGetValueW(HKEY_LOCAL_MACHINE, path.c_str(), value, RRF_RT_REG_MULTI_SZ, nullptr, buf.data(), &size)
+            != ERROR_SUCCESS)
+            continue;
+        for (const wchar_t* clsid = buf.data(); *clsid; clsid += wcslen(clsid) + 1) {
+            if (_wcsicmp(clsid, kApoClsidString) == 0 || _wcsicmp(clsid, L"{00000000-0000-0000-0000-000000000000}") == 0)
+                continue;
+            const std::wstring apoKey = std::wstring(L"SOFTWARE\\Classes\\AudioEngine\\AudioProcessingObjects\\") + clsid;
+            wchar_t name[256] = {};
+            DWORD nameSize = sizeof(name);
+            std::wstring n = RegGetValueW(HKEY_LOCAL_MACHINE, apoKey.c_str(), L"FriendlyName", RRF_RT_REG_SZ, nullptr,
+                                          name, &nameSize)
+                    == ERROR_SUCCESS
+                ? std::wstring(name)
+                : std::wstring(clsid);
+            if (std::find(names.begin(), names.end(), n) == names.end())
+                names.push_back(std::move(n));
+        }
+    }
+    return names;
+}
+
 struct Persisted {
     bool found = false;     // havia um ganho mestre salvo
     float master = 1.0f;    // linear
