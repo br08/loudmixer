@@ -83,6 +83,10 @@
         <source>This audio backend does not support DSP processing.</source>
         <translation>Este backend de áudio não suporta processamento DSP.</translation>
     </message>
+    <message>
+        <source>This device already boosts above 100% through the LoudMixer system effect.</source>
+        <translation>Este dispositivo já passa de 100% pelo efeito de sistema do LoudMixer.</translation>
+    </message>
 </context>
 <context>
     <name>loudmixer::AudioSessionManager</name>
@@ -269,6 +273,106 @@ Dispositivo de saída padrão</translation>
         <source>Delete the preset “%1”?</source>
         <translation>Excluir o preset “%1”?</translation>
     </message>
+    <message>
+        <source> — click “Turn on boost” on a device to go above 100%</source>
+        <translation> — clique em “Ligar boost” num dispositivo para passar de 100%</translation>
+    </message>
+    <message>
+        <source>Turn on boost</source>
+        <translation>Ligar boost</translation>
+    </message>
+    <message>
+        <source>Let this device, its channels and its apps go up to 200% (asks for administrator permission)</source>
+        <translation>Deixa este dispositivo, os canais e os apps dele irem até 200% (pede permissão de administrador)</translation>
+    </message>
+    <message>
+        <source>Boost on</source>
+        <translation>Boost ligado</translation>
+    </message>
+    <message>
+        <source>Boost up to 200% is on for this device. Click to turn it off.</source>
+        <translation>O boost até 200% está ligado neste dispositivo. Clique para desligar.</translation>
+    </message>
+    <message>
+        <source>Boost paused</source>
+        <translation>Boost pausado</translation>
+    </message>
+    <message>
+        <source>Audio enhancements were turned off for this device in the Windows settings, so the boost stopped. Click to turn it back on.</source>
+        <translation>Os aprimoramentos de áudio deste dispositivo foram desligados nas configurações do Windows, e o boost parou. Clique para religar.</translation>
+    </message>
+    <message>
+        <source>Boost removed</source>
+        <translation>Boost removido</translation>
+    </message>
+    <message>
+        <source>A driver or Windows update removed the boost from this device. Click to turn it back on.</source>
+        <translation>Uma atualização de driver ou do Windows removeu o boost deste dispositivo. Clique para religar.</translation>
+    </message>
+    <message>
+        <source>Turning off…</source>
+        <translation>Desligando…</translation>
+    </message>
+    <message>
+        <source>Turning on…</source>
+        <translation>Ligando…</translation>
+    </message>
+    <message>
+        <source>LoudMixer will add its audio effect to “%1” so it can go up to 200%.</source>
+        <translation>O LoudMixer vai adicionar o efeito de áudio dele a “%1” para que ele possa ir até 200%.</translation>
+    </message>
+    <message>
+        <source>Windows will ask for administrator permission.</source>
+        <translation>O Windows vai pedir permissão de administrador.</translation>
+    </message>
+    <message>
+        <source>The audio pauses for a few seconds.</source>
+        <translation>O áudio para por alguns segundos.</translation>
+    </message>
+    <message>
+        <source>Audio enhancements are turned on for this device.</source>
+        <translation>Os aprimoramentos de áudio deste dispositivo são ligados.</translation>
+    </message>
+    <message>
+        <source>This also turns on the effects already installed for it: %1.</source>
+        <translation>Isso também liga os efeitos que já estão instalados para ele: %1.</translation>
+    </message>
+    <message>
+        <source>Turn off the boost on “%1”? The device goes back to how it was before (up to 100%).</source>
+        <translation>Desligar o boost em “%1”? O dispositivo volta a ser como era antes (até 100%).</translation>
+    </message>
+    <message>
+        <source>Boost up to 200%</source>
+        <translation>Boost até 200%</translation>
+    </message>
+    <message>
+        <source>Turn off boost</source>
+        <translation>Desligar boost</translation>
+    </message>
+    <message>
+        <source>Windows does not run audio effects on “%1”, so the boost could not be turned on. The device was left as it was.
+
+As an alternative, the virtual cable route can be turned on in Settings &gt; Advanced.</source>
+        <translation>O Windows não roda efeitos de áudio em “%1”, por isso o boost não pôde ser ligado. O dispositivo ficou como estava.
+
+Como alternativa, a rota por cabo virtual pode ser ligada em Configurações &gt; Avançado.</translation>
+    </message>
+    <message>
+        <source>The LoudMixer audio effect tool (loudmixer-apo-setup.exe) was not found. Reinstall LoudMixer.</source>
+        <translation>A ferramenta do efeito de áudio do LoudMixer (loudmixer-apo-setup.exe) não foi encontrada. Reinstale o LoudMixer.</translation>
+    </message>
+    <message>
+        <source>Could not turn on the boost on “%1”:
+%2</source>
+        <translation>Não foi possível ligar o boost em “%1”:
+%2</translation>
+    </message>
+    <message>
+        <source>Could not turn off the boost on “%1”:
+%2</source>
+        <translation>Não foi possível desligar o boost em “%1”:
+%2</translation>
+    </message>
 </context>
 <context>
     <name>loudmixer::ui::SettingsDialog</name>
@@ -370,6 +474,18 @@ Dispositivo de saída padrão</translation>
         <translation>Não foi possível alterar a inicialização automática:
 %1</translation>
     </message>
+    <message>
+        <source>Advanced</source>
+        <translation>Avançado</translation>
+    </message>
+    <message>
+        <source>Show the virtual cable route (“DSP boost”) on devices</source>
+        <translation>Mostrar a rota por cabo virtual (“Boost DSP”) nos dispositivos</translation>
+    </message>
+    <message>
+        <source>Alternative way to go above 100% for devices where the boost button does not work. Needs a virtual audio cable (e.g. VB-Audio Cable) set as the Windows default output.</source>
+        <translation>Outro jeito de passar de 100% em dispositivos onde o botão de boost não funciona. Precisa de um cabo de áudio virtual (ex.: VB-Audio Cable) como saída padrão do Windows.</translation>
+    </message>
 </context>
 <context>
     <name>loudmixer::ui::TrayController</name>
@@ -412,6 +528,22 @@ Dispositivo de saída padrão</translation>
     <message>
         <source>Save current as preset…</source>
         <translation>Salvar estado atual como preset…</translation>
+    </message>
+    <message>
+        <source>Audio enhancements were turned off for it in the Windows settings.</source>
+        <translation>Os aprimoramentos de áudio dele foram desligados nas configurações do Windows.</translation>
+    </message>
+    <message>
+        <source>A driver or Windows update removed it.</source>
+        <translation>Uma atualização de driver ou do Windows o removeu.</translation>
+    </message>
+    <message>
+        <source>Boost turned off on %1</source>
+        <translation>Boost desligado em %1</translation>
+    </message>
+    <message>
+        <source>Open LoudMixer to turn it back on.</source>
+        <translation>Abra o LoudMixer para religar.</translation>
     </message>
 </context>
 <context>

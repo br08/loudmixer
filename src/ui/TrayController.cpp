@@ -1,6 +1,7 @@
 #include "TrayController.h"
 
 #include "AppIcons.h"
+#include "BuildInfo.h"
 #include "MixerWindow.h"
 #include "core/AudioSessionManager.h"
 #include "core/AutoStartService.h"
@@ -25,6 +26,18 @@ TrayController::TrayController(AudioSessionManager* manager, MixerWindow* window
     , tray_(new QSystemTrayIcon(appIcon(), this))
     , menu_(std::make_unique<QMenu>())
 {
+    // O boost do sistema caiu por fora (aprimoramentos desligados, driver
+    // atualizado): avisa mesmo com a janela fechada.
+    connect(manager_, &AudioSessionManager::systemBoostLost, this, [this](const QString& id) {
+        const auto d = manager_->device(id.toStdString());
+        const QString name = d ? QString::fromStdString(d->description) : id;
+        const QString why = d && d->systemBoostState == SystemBoostState::EnhancementsOff
+            ? tr("Audio enhancements were turned off for it in the Windows settings.")
+            : tr("A driver or Windows update removed it.");
+        tray_->showMessage(tr("Boost turned off on %1").arg(name), why + QLatin1Char('\n') + tr("Open LoudMixer to turn it back on."),
+                           QSystemTrayIcon::Warning);
+    });
+
     menu_->addAction(tr("Open mixer"), window_, &MixerWindow::showAndRaise);
     menu_->addSeparator();
 
@@ -85,7 +98,7 @@ void TrayController::updateState()
 {
     const auto dev = manager_->device(manager_->defaultDeviceId());
     TrayState state = TrayState::Normal;
-    QString tip = QStringLiteral("LoudMixer");
+    QString tip = appDisplayName();
     if (dev) {
         if (dev->muted)
             state = TrayState::Muted;

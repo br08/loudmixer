@@ -24,6 +24,8 @@ inline constexpr auto geometry = "ui/geometry";
 inline constexpr auto lastTab = "ui/lastTab";
 inline constexpr auto trayHintShown = "ui/trayHintShown";
 inline constexpr auto boostSource = "windows/boostSource";
+// Windows: mostra a rota por cabo virtual ("Boost DSP") nos dispositivos.
+inline constexpr auto showCableRoute = "windows/showCableRoute";
 } // namespace keys
 
 class SettingsDialog : public QDialog {
@@ -43,6 +45,7 @@ private:
     QCheckBox* hotkeys_;
     QComboBox* language_;
     QLineEdit* boostSource_ = nullptr;
+    QCheckBox* showCableRoute_ = nullptr;
 };
 
 } // namespace loudmixer::ui

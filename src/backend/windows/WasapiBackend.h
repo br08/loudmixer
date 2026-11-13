@@ -7,15 +7,28 @@
 //   Dispositivo -> IAudioEndpointVolume (mestre, nativo até 100%)
 //   Canal       -> IAudioEndpointVolume::SetChannelVolumeLevelScalar (até 100%)
 //
-// Acima de 100% é preciso processar o áudio: com uma rota de boost ativa
-// (attachProcessor), o áudio que toca num cabo virtual é capturado em
-// loopback, passa pelo GainProcessor e é reinjetado no dispositivo físico
-// (LoopbackCapture). Com a rota ativa:
-//   - dispositivo: o slider controla o ganho do DSP (0–200%);
-//   - canal: até 100% nativo, acima disso ganho por canal no DSP;
-//   - app: o slider da sessão vira pré-atenuador. Se algum app pede mais que
-//     100%, o DSP sobe pelo maior pedido (B) e cada sessão é atenuada para
-//     ganho/B — exatamente a "solução prática v1" do plano.
+// Acima de 100% é preciso processar o áudio. Há dois caminhos:
+//
+// 1. Boost do sistema (principal): o APO do LoudMixer na cadeia de efeitos do
+//    dispositivo. setSystemBoost() o ativa/desativa rodando o
+//    loudmixer-apo-setup elevado (UAC); o estado de cada dispositivo
+//    (SystemBoostState) vem do registro a cada varredura. Com o APO ativo:
+//      - dispositivo e canais: ganho efetivo = volume nativo × fator do APO
+//        (ver ApoRouteMath.h): até 100% no Windows, acima disso no APO;
+//      - apps: se algum pede mais que 100%, o APO sobe pelo maior pedido (B)
+//        e cada sessão é atenuada para ganho/B.
+//    O estado efetivo vai para a memória compartilhada do APO na hora e para
+//    o registro (em lote), para o APO reaplicá-lo quando o Windows o recriar.
+//    Ativar/desativar reinicia os serviços de áudio: o backend recria o
+//    enumerador e os objetos COM quando isso acontece.
+//
+// 2. Rota por cabo virtual (alternativa, attachProcessor): o áudio que toca
+//    num cabo virtual é capturado em loopback, passa pelo GainProcessor e é
+//    reinjetado no dispositivo físico (LoopbackCapture). Com a rota ativa:
+//      - dispositivo: o slider controla o ganho do DSP (0–200%);
+//      - canal: até 100% nativo, acima disso ganho por canal no DSP;
+//      - app: o mesmo esquema do B acima, com o DSP no lugar do APO
+//        ("solução prática v1" do plano).
 //
 // Todas as chamadas COM rodam numa thread dedicada (MTA). A UI só vê
 // snapshots, atualizados por notificações do IMMDeviceEnumerator e por uma
@@ -57,6 +70,8 @@ public:
 
     bool supportsProcessor(TargetKind kind) const override { return kind == TargetKind::Device; }
     bool attachProcessor(const Target& target, std::shared_ptr<GainProcessor> processor, std::string* error) override;
+    std::optional<ProcessorStats> takeDeviceStats(const std::string& deviceId) override;
+    SystemBoostResult setSystemBoost(const std::string& deviceId, bool enabled) override;
 
     // "boostSource": nome (ou parte do nome) do endpoint usado como origem da
     // rota de boost. Vazio = detecta VB-Audio "CABLE Input", VoiceMeeter ou
@@ -73,6 +88,10 @@ private:
 
     void refresh();          // thread COM
     void applyRouteGains();  // thread COM
+    void applyApoGains(const std::string& deviceId); // thread COM
+    void detachApo(const std::string& deviceId);     // thread COM
+    void flushApoState();                            // thread COM: salva no registro
+    bool resetDeviceCom();                           // thread COM: após reinício do áudio
     void notify(ChangeKind kind, const std::string& id);
 
     std::unique_ptr<Impl> d_;

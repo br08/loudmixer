@@ -39,9 +39,12 @@ if(WIN32)
         backend/windows/SessionEnumerator.h
         backend/windows/LoopbackCapture.cpp
         backend/windows/LoopbackCapture.h
+        backend/windows/ApoRouteMath.h
+        apo/ApoRegistry.h
+        apo/ApoShared.h
     )
     target_compile_definitions(loudmixer_core PRIVATE LOUDMIXER_HAVE_WASAPI UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
-    target_link_libraries(loudmixer_core PUBLIC ole32 oleaut32 uuid avrt)
+    target_link_libraries(loudmixer_core PUBLIC ole32 oleaut32 uuid avrt advapi32 shell32)
 elseif(UNIX AND NOT APPLE)
     find_package(PkgConfig REQUIRED)
     if(LOUDMIXER_WITH_PULSE)
@@ -71,6 +74,37 @@ elseif(UNIX AND NOT APPLE)
 endif()
 
 # ---------------------------------------------------------------------------
+# Windows: APO de sistema (boost do dispositivo inteiro, sem cabo virtual)
+# ---------------------------------------------------------------------------
+if(WIN32)
+    # A DLL roda dentro do audiodg.exe, que não acha as DLLs do MinGW: tudo
+    # estático (só dependências do próprio Windows).
+    add_library(loudmixer_apo SHARED
+        apo/LoudMixerApo.cpp
+        apo/ApoInterfaces.h
+        apo/ApoShared.h
+        apo/loudmixer_apo.def
+    )
+    set_target_properties(loudmixer_apo PROPERTIES PREFIX "" OUTPUT_NAME loudmixer_apo)
+    target_include_directories(loudmixer_apo PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(loudmixer_apo PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_link_libraries(loudmixer_apo PRIVATE loudmixer_dsp ole32 uuid advapi32)
+    loudmixer_set_warnings(loudmixer_apo)
+
+    add_executable(loudmixer-apo-setup apo/ApoSetup.cpp)
+    target_include_directories(loudmixer-apo-setup PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(loudmixer-apo-setup PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_link_libraries(loudmixer-apo-setup PRIVATE ole32 uuid advapi32 shell32)
+    add_dependencies(loudmixer-apo-setup loudmixer_apo)
+    loudmixer_set_warnings(loudmixer-apo-setup)
+
+    if(MINGW)
+        target_link_options(loudmixer_apo PRIVATE -static)
+        target_link_options(loudmixer-apo-setup PRIVATE -static)
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
 # Aplicativo
 # ---------------------------------------------------------------------------
 if(NOT LOUDMIXER_BUILD_APP)
@@ -81,6 +115,7 @@ qt_add_executable(loudmixer WIN32
     main.cpp
     ui/AppIcons.cpp
     ui/AppIcons.h
+    ui/BuildInfo.h
     ui/ChannelsPanel.cpp
     ui/ChannelsPanel.h
     ui/GainSlider.cpp
@@ -98,7 +133,8 @@ qt_add_executable(loudmixer WIN32
     ${PROJECT_SOURCE_DIR}/resources/loudmixer.qrc
 )
 set_target_properties(loudmixer PROPERTIES AUTOMOC ON AUTORCC ON OUTPUT_NAME loudmixer)
-target_compile_definitions(loudmixer PRIVATE LOUDMIXER_VERSION="${PROJECT_VERSION}")
+target_compile_definitions(loudmixer PRIVATE LOUDMIXER_VERSION="${PROJECT_VERSION}"
+    $<$<CONFIG:Debug>:LOUDMIXER_DEV_BUILD>) # "(dev)" no título e na bandeja
 target_link_libraries(loudmixer PRIVATE loudmixer_core Qt6::Gui Qt6::Widgets Qt6::Network)
 if(WIN32)
     target_sources(loudmixer PRIVATE ${PROJECT_SOURCE_DIR}/resources/loudmixer.rc)
@@ -122,6 +158,11 @@ endif()
 
 include(GNUInstallDirs)
 install(TARGETS loudmixer RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+if(TARGET loudmixer_apo)
+    # O APO é registrado a partir desta pasta (Program Files): o audiodg, que
+    # roda como LOCAL SERVICE, consegue lê-la.
+    install(TARGETS loudmixer_apo loudmixer-apo-setup RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
 if(UNIX AND NOT APPLE)
     install(FILES ${PROJECT_SOURCE_DIR}/packaging/linux/loudmixer.desktop
             DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)

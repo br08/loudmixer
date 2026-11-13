@@ -280,3 +280,80 @@ int main(int argc, char** argv)
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
+
+// Boost do sistema (APO no Windows): sem rota DSP própria, a medição do LED
+// vem do backend.
+TEST_F(Fixture, SystemBoostStatsReachTheUiWithoutRoute)
+{
+    EXPECT_FALSE(manager->takeStats("mock.headphones").has_value());
+    ProcessorStats st;
+    st.peakOut = 0.97f;
+    st.clippedSamples = 7;
+    mock->simulateSystemBoost("mock.headphones", SystemBoostState::Active, st);
+    ASSERT_TRUE(waitFor([&] {
+        auto d = manager->device("mock.headphones");
+        return d && d->systemBoost;
+    }));
+    EXPECT_FALSE(manager->boostRouteActive("mock.headphones"));
+    auto stats = manager->takeStats("mock.headphones");
+    ASSERT_TRUE(stats.has_value());
+    EXPECT_EQ(stats->clippedSamples, 7u);
+    EXPECT_FLOAT_EQ(stats->peakOut, 0.97f);
+    EXPECT_EQ(manager->takeStats("mock.headphones")->clippedSamples, 0u); // leitura zera
+
+    mock->simulateSystemBoost("mock.headphones", SystemBoostState::Off);
+    ASSERT_TRUE(waitFor([&] { return !manager->device("mock.headphones")->systemBoost; }));
+    EXPECT_FALSE(manager->takeStats("mock.headphones").has_value());
+}
+
+// Ativar/desativar o boost do sistema é assíncrono (UAC + reinício do áudio).
+TEST_F(Fixture, SystemBoostRequestIsAsyncAndReportsResult)
+{
+    mock->simulateSystemBoost("mock.speakers", SystemBoostState::Off);
+    ASSERT_TRUE(waitFor([&] { return manager->device("mock.speakers")->systemBoostState == SystemBoostState::Off; }));
+
+    QString finishedId;
+    int finishedCode = -1;
+    QObject::connect(manager.get(), &AudioSessionManager::systemBoostFinished,
+                     [&](const QString& id, bool, int code, const QString&) {
+                         finishedId = id;
+                         finishedCode = code;
+                     });
+    ASSERT_TRUE(manager->requestSystemBoost("mock.speakers", true));
+    EXPECT_EQ(manager->systemBoostPending(), "mock.speakers");
+    EXPECT_FALSE(manager->requestSystemBoost("mock.headphones", true)); // um por vez
+
+    ASSERT_TRUE(waitFor([&] { return finishedCode >= 0; }));
+    EXPECT_EQ(finishedId, "mock.speakers");
+    EXPECT_EQ(finishedCode, static_cast<int>(SystemBoostResult::Code::Ok));
+    EXPECT_TRUE(manager->systemBoostPending().empty());
+    ASSERT_TRUE(waitFor([&] { return manager->device("mock.speakers")->systemBoost; }));
+
+    // Falha: o resultado chega e o estado não muda.
+    mock->setSystemBoostResult({SystemBoostResult::Code::NoWorkingStage, {}});
+    finishedCode = -1;
+    ASSERT_TRUE(manager->requestSystemBoost("mock.headphones", true));
+    ASSERT_TRUE(waitFor([&] { return finishedCode >= 0; }));
+    EXPECT_EQ(finishedCode, static_cast<int>(SystemBoostResult::Code::NoWorkingStage));
+    EXPECT_FALSE(manager->device("mock.headphones")->systemBoost);
+}
+
+// Boost que cai por fora (driver atualizado, aprimoramentos desligados) avisa a UI.
+TEST_F(Fixture, SystemBoostLostOutsideIsReported)
+{
+    mock->simulateSystemBoost("mock.speakers", SystemBoostState::Active);
+    ASSERT_TRUE(waitFor([&] { return manager->device("mock.speakers")->systemBoost; }));
+    QStringList lost;
+    QObject::connect(manager.get(), &AudioSessionManager::systemBoostLost, [&](const QString& id) { lost << id; });
+    mock->simulateSystemBoost("mock.speakers", SystemBoostState::RemovedExternally);
+    ASSERT_TRUE(waitFor([&] { return !lost.isEmpty(); }));
+    EXPECT_EQ(lost, QStringList{"mock.speakers"});
+
+    // Desligar pelo próprio app não é "perda".
+    lost.clear();
+    mock->simulateSystemBoost("mock.speakers", SystemBoostState::Active);
+    ASSERT_TRUE(waitFor([&] { return manager->device("mock.speakers")->systemBoost; }));
+    mock->simulateSystemBoost("mock.speakers", SystemBoostState::Off);
+    ASSERT_TRUE(waitFor([&] { return !manager->device("mock.speakers")->systemBoost; }));
+    EXPECT_TRUE(lost.isEmpty());
+}

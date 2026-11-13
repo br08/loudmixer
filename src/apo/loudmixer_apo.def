@@ -1,0 +1,4 @@
+LIBRARY loudmixer_apo
+EXPORTS
+    DllGetClassObject PRIVATE
+    DllCanUnloadNow PRIVATE

@@ -11,15 +11,27 @@
 //  - Depois que stop() retorna, nenhum callback pode mais ser disparado.
 
 #include "AudioTypes.h"
+#include "GainProcessor.h"
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 namespace loudmixer {
 
-class GainProcessor;
+struct SystemBoostResult {
+    enum class Code {
+        Ok,
+        Cancelled,      // o usuário recusou o pedido de administrador (UAC)
+        Unsupported,    // backend/instalação sem boost do sistema
+        NoWorkingStage, // o Windows não roda efeitos de sistema neste dispositivo
+        Failed,
+    };
+    Code code = Code::Unsupported;
+    std::string detail; // mensagem técnica (em inglês ou da ferramenta) para Failed
+};
 
 class IAudioBackend {
 public:
@@ -62,6 +74,26 @@ public:
     // são suportados. Enquanto ativo, setGain() no dispositivo passa a
     // controlar o ganho do processador.
     virtual bool supportsProcessor(TargetKind kind) const { (void)kind; return false; }
+
+    // Estatísticas de processamento de um dispositivo cujo boost é feito pelo
+    // próprio sistema (AudioDevice::systemBoost). Zera os picos a cada leitura.
+    // Pode ser chamada de qualquer thread.
+    virtual std::optional<ProcessorStats> takeDeviceStats(const std::string& deviceId)
+    {
+        (void)deviceId;
+        return std::nullopt;
+    }
+
+    // Ativa/desativa o boost do sistema num dispositivo (ver SystemBoostState).
+    // Pode pedir permissão de administrador e reiniciar o áudio do sistema:
+    // bloqueia por vários segundos. Chamar fora da thread da UI. Não deve
+    // depender do estado interno do backend (pode rodar em paralelo a ele).
+    virtual SystemBoostResult setSystemBoost(const std::string& deviceId, bool enabled)
+    {
+        (void)deviceId;
+        (void)enabled;
+        return {};
+    }
     virtual bool attachProcessor(const Target& target, std::shared_ptr<GainProcessor> processor, std::string* error)
     {
         (void)target;

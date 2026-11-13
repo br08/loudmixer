@@ -19,6 +19,8 @@
 #include <QString>
 #include <QTimer>
 
+#include <thread>
+
 #include <map>
 #include <memory>
 #include <optional>
@@ -68,6 +70,13 @@ public:
     std::vector<std::string> activeBoostRoutes() const;
     std::optional<ProcessorStats> takeStats(const std::string& deviceId);
 
+    // Boost do sistema (Windows: APO), por dispositivo. Assíncrono: pode pedir
+    // permissão de administrador e reiniciar o áudio; o resultado chega por
+    // systemBoostFinished. Um pedido por vez (devolve false se já houver um).
+    bool requestSystemBoost(const std::string& deviceId, bool enabled);
+    // Dispositivo com pedido em andamento (vazio se nenhum).
+    std::string systemBoostPending() const { return systemBoostPending_; }
+
     void setClipCurve(ClipCurve curve);
     ClipCurve clipCurve() const { return curve_; }
 
@@ -82,6 +91,12 @@ signals:
     void devicesChanged();
     void sessionsChanged();
     void boostRouteChanged(const QString& deviceId, bool active);
+    // code: SystemBoostResult::Code
+    void systemBoostFinished(const QString& deviceId, bool enabled, int code, const QString& detail);
+    void systemBoostPendingChanged();
+    // O boost do sistema deixou de estar ativo sem pedido do usuário
+    // (aprimoramentos desligados, atualização de driver...).
+    void systemBoostLost(const QString& deviceId);
     void errorOccurred(const QString& message);
 
 private:
@@ -103,6 +118,9 @@ private:
     QTimer coalesceTimer_;
     bool devicesDirty_ = false;
     bool sessionsDirty_ = false;
+
+    std::string systemBoostPending_;
+    std::thread systemBoostThread_;
 };
 
 } // namespace loudmixer

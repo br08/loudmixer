@@ -19,6 +19,7 @@ class QToolButton;
 class QVBoxLayout;
 
 namespace loudmixer {
+struct AudioDevice;
 class AudioSessionManager;
 class AutoStartService;
 class PresetStore;
@@ -58,6 +59,9 @@ private:
     void updateLeds();
     void deletePreset();
     void toggleBoost(const std::string& deviceId, bool enabled);
+    void updateSystemBoostButton(QToolButton* button, const AudioDevice& device);
+    void onSystemBoostClicked(const std::string& deviceId);
+    void onSystemBoostFinished(const QString& deviceId, bool enabled, int code, const QString& detail);
 
     AudioSessionManager* manager_;
     PresetStore* presets_;
@@ -76,6 +80,7 @@ private:
     std::map<std::string, GainSlider*> sessionRows_;
     std::map<std::string, GainSlider*> deviceRows_;
     std::map<std::string, QCheckBox*> boostBoxes_;
+    std::map<std::string, QToolButton*> systemBoostButtons_;
     std::map<std::string, qint64> clipHoldUntil_;
     QTimer ledTimer_;
     QElapsedTimer clock_;

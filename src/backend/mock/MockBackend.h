@@ -30,6 +30,8 @@ public:
 
     bool supportsProcessor(TargetKind kind) const override { return kind == TargetKind::Device; }
     bool attachProcessor(const Target& target, std::shared_ptr<GainProcessor> processor, std::string* error) override;
+    std::optional<ProcessorStats> takeDeviceStats(const std::string& deviceId) override;
+    SystemBoostResult setSystemBoost(const std::string& deviceId, bool enabled) override;
 
     // --- Utilidades para testes (simulam hot-plug e apps abrindo/fechando) ---
     void addDevice(const AudioDevice& device);
@@ -38,6 +40,11 @@ public:
     void removeSession(const std::string& id);
     void setDefaultDevice(const std::string& id);
     std::shared_ptr<GainProcessor> processorFor(const std::string& deviceId) const;
+    // Simula o boost do sistema (APO no Windows): estado do dispositivo e as
+    // estatísticas que ele publicaria.
+    void simulateSystemBoost(const std::string& deviceId, SystemBoostState state, ProcessorStats stats = {});
+    // Resultado que setSystemBoost() devolve (padrão: Ok, e o estado muda).
+    void setSystemBoostResult(SystemBoostResult result);
     bool started() const;
 
 private:
@@ -49,6 +56,8 @@ private:
     std::vector<AudioDevice> devices_;
     std::vector<AudioSession> sessions_;
     std::map<std::string, std::shared_ptr<GainProcessor>> processors_;
+    std::map<std::string, ProcessorStats> systemStats_;
+    SystemBoostResult systemBoostResult_{SystemBoostResult::Code::Ok, {}};
     ChangeCallback callback_;
 };
 
