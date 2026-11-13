@@ -31,10 +31,25 @@ std::atomic<long> g_serverLocks{0};
 
 constexpr float kDefaultGain = 1.0f;
 
-// Log de diagnóstico (protótipo) em %ProgramData%\LoudMixer\apo.log. Nunca é
-// chamado do thread de tempo real. Limitado a ~1 MB.
+// Log de diagnóstico em %ProgramData%\LoudMixer\apo.log, ligado só quando
+// HKLM\SOFTWARE\LoudMixer\Apo\DebugLog != 0 (lido uma vez por processo).
+// Nunca é chamado do thread de tempo real. Limitado a ~1 MB.
+bool logEnabled()
+{
+    static const bool enabled = [] {
+        DWORD v = 0;
+        DWORD size = sizeof(v);
+        return RegGetValueW(HKEY_LOCAL_MACHINE, kApoSettingsKey, kDebugLogValue, RRF_RT_REG_DWORD, nullptr, &v, &size)
+                == ERROR_SUCCESS
+            && v != 0;
+    }();
+    return enabled;
+}
+
 void apoLog(const wchar_t* fmt, ...)
 {
+    if (!logEnabled())
+        return;
     wchar_t path[MAX_PATH];
     if (!ExpandEnvironmentStringsW(L"%ProgramData%\\LoudMixer\\apo.log", path, MAX_PATH))
         return;
@@ -64,6 +79,20 @@ void apoLog(const wchar_t* fmt, ...)
     CloseHandle(f);
 }
 
+// A memória compartilhada pode ser escrita por qualquer processo do usuário:
+// nada lido dela é confiável (ganhos já são limitados pelo GainProcessor).
+loudmixer::ClipCurve sanitizeCurve(std::int32_t v)
+{
+    switch (v) {
+    case static_cast<std::int32_t>(loudmixer::ClipCurve::Hard):
+    case static_cast<std::int32_t>(loudmixer::ClipCurve::Tanh):
+    case static_cast<std::int32_t>(loudmixer::ClipCurve::Cubic):
+        return static_cast<loudmixer::ClipCurve>(v);
+    default:
+        return loudmixer::ClipCurve::Tanh;
+    }
+}
+
 bool isFloat32(const UNCOMPRESSEDAUDIOFORMAT& f)
 {
     return f.guidFormatType == kSubtypeIeeeFloat && f.dwBytesPerSampleContainer == 4 && f.dwValidBitsPerSample == 32
@@ -88,10 +117,15 @@ std::wstring guidText(const GUID& g)
     return buf;
 }
 
+// Máximo atômico com número limitado de tentativas: o alvo está numa memória
+// que outros processos escrevem, e o thread de tempo real não pode ficar
+// preso num laço de CAS. Perder uma atualização de pico é irrelevante.
 void atomicMax(std::atomic<float>& target, float value)
 {
     float cur = target.load(std::memory_order_relaxed);
-    while (value > cur && !target.compare_exchange_weak(cur, value, std::memory_order_relaxed)) {
+    for (int i = 0; i < 4 && value > cur; ++i) {
+        if (target.compare_exchange_weak(cur, value, std::memory_order_relaxed))
+            return;
     }
 }
 
@@ -138,6 +172,8 @@ public:
             s->version = kSharedVersion;
             s->gain.store(initialGainFor(endpointGuid), std::memory_order_relaxed);
             s->curve.store(static_cast<std::int32_t>(loudmixer::ClipCurve::Tanh), std::memory_order_relaxed);
+            for (auto& g : s->channelGains)
+                g.store(1.0f, std::memory_order_relaxed);
             s->magic.store(kSharedMagic, std::memory_order_release);
         } else {
             // Outra instância está criando: espera ela publicar (fora do tempo real).
@@ -290,7 +326,7 @@ public:
     {
         if (!initialized_)
             return APOERR_NOT_INITIALIZED;
-        if (locked_)
+        if (locked_.load())
             return APOERR_APO_LOCKED;
         if (u32NumInputConnections != 1 || u32NumOutputConnections != 1 || !ppInputConnections || !ppOutputConnections
             || !ppInputConnections[0] || !ppOutputConnections[0] || !ppInputConnections[0]->pFormat)
@@ -307,6 +343,7 @@ public:
             return APOERR_FORMAT_NOT_SUPPORTED;
 
         channels_ = f.dwSamplesPerFrame;
+        maxFrames_ = std::min(ppInputConnections[0]->u32MaxFrameCount, ppOutputConnections[0]->u32MaxFrameCount);
         blocks_.store(0, std::memory_order_relaxed);
         processor_.resetRamp();
         if (auto* s = shared_.get()) {
@@ -314,15 +351,15 @@ public:
             s->channels.store(channels_, std::memory_order_relaxed);
             s->lockedInstances.fetch_add(1, std::memory_order_relaxed);
         }
-        locked_ = true;
+        locked_.store(true, std::memory_order_release);
         return S_OK;
     }
 
     HRESULT STDMETHODCALLTYPE UnlockForProcess() override
     {
-        if (!locked_)
+        if (!locked_.load())
             return APOERR_ALREADY_UNLOCKED;
-        locked_ = false;
+        locked_.store(false, std::memory_order_release);
         if (auto* s = shared_.get())
             s->lockedInstances.fetch_sub(1, std::memory_order_relaxed);
         apoLog(L"UnlockForProcess: %llu blocos processados", static_cast<unsigned long long>(blocks_.load()));
@@ -335,11 +372,14 @@ public:
                                       UINT32 u32NumOutputConnections,
                                       APO_CONNECTION_PROPERTY** ppOutputConnections) override
     {
-        if (!locked_ || u32NumInputConnections != 1 || u32NumOutputConnections != 1)
+        if (!locked_.load(std::memory_order_acquire) || u32NumInputConnections != 1 || u32NumOutputConnections != 1)
             return;
         APO_CONNECTION_PROPERTY* in = ppInputConnections[0];
         APO_CONNECTION_PROPERTY* out = ppOutputConnections[0];
-        const UINT32 frames = in->u32ValidFrameCount;
+        if (!in || !out || !in->pBuffer || !out->pBuffer)
+            return;
+        // Defesa: nunca processa além do máximo combinado no LockForProcess.
+        const UINT32 frames = std::min(in->u32ValidFrameCount, maxFrames_);
         SharedState* s = shared_.get();
         blocks_.fetch_add(1, std::memory_order_relaxed);
 
@@ -361,7 +401,10 @@ public:
         } else {
             if (s) {
                 processor_.setGain(s->gain.load(std::memory_order_relaxed));
-                processor_.setCurve(static_cast<loudmixer::ClipCurve>(s->curve.load(std::memory_order_relaxed)));
+                processor_.setCurve(sanitizeCurve(s->curve.load(std::memory_order_relaxed)));
+                const int n = std::min(static_cast<int>(channels_), kSharedMaxChannels);
+                for (int c = 0; c < n; ++c)
+                    processor_.setChannelGain(c, s->channelGains[c].load(std::memory_order_relaxed));
             } else {
                 processor_.setGain(fallbackGain_);
             }
@@ -482,7 +525,7 @@ private:
         if (!requested || !supported)
             return E_POINTER;
         *supported = nullptr;
-        if (locked_)
+        if (locked_.load())
             return APOERR_APO_LOCKED;
         UNCOMPRESSEDAUDIOFORMAT f{};
         if (FAILED(requested->GetUncompressedAudioFormat(&f)) || !isFloat32(f)) {
@@ -508,8 +551,9 @@ private:
     std::atomic<ULONG> refs_{1};
     std::atomic<std::uint64_t> blocks_{0};
     bool initialized_ = false;
-    bool locked_ = false;
+    std::atomic<bool> locked_{false};
     UINT32 channels_ = 0;
+    UINT32 maxFrames_ = 0;
     float fallbackGain_ = kDefaultGain;
     loudmixer::GainProcessor processor_{kDefaultGain, loudmixer::ClipCurve::Tanh};
     SharedSection shared_;

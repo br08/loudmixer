@@ -15,6 +15,7 @@
 #include "apo/ApoInterfaces.h"
 #include "apo/ApoShared.h"
 
+#include <audioclient.h>
 #include <mmdeviceapi.h>
 #include <sddl.h>
 #include <shellapi.h>
@@ -22,6 +23,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include <optional>
 #include <string>
 #include <vector>
@@ -242,6 +244,7 @@ bool containsClsid(const std::vector<std::wstring>& list)
 // --- Dispositivos ---------------------------------------------------------------------
 
 struct Endpoint {
+    std::wstring id; // id completo do IMMDevice
     std::wstring guid;
     std::wstring name;
     bool isDefault = false;
@@ -296,6 +299,7 @@ std::vector<Endpoint> listEndpoints()
         Endpoint e;
         LPWSTR id = nullptr;
         if (SUCCEEDED(dev->GetId(&id))) {
+            e.id = id;
             e.guid = normalizeEndpointGuid(id);
             CoTaskMemFree(id);
         }
@@ -434,32 +438,53 @@ std::wstring moduleDir()
     return p.substr(0, p.find_last_of(L"\\/"));
 }
 
-std::wstring installDir()
+std::wstring programFilesDir()
 {
     PWSTR pf = nullptr;
     if (FAILED(SHGetKnownFolderPath(FOLDERID_ProgramFiles, 0, nullptr, &pf)))
         throw Failure{L"pasta Program Files não encontrada"};
-    std::wstring dir = std::wstring(pf) + L"\\LoudMixer\\apo";
+    std::wstring dir = pf;
     CoTaskMemFree(pf);
     return dir;
 }
 
+// Pasta para onde a DLL é copiada quando a ferramenta roda de fora de
+// Program Files (build de desenvolvimento).
+std::wstring installDir() { return programFilesDir() + L"\\LoudMixer\\apo"; }
+
+bool isUnder(const std::wstring& path, const std::wstring& dir)
+{
+    return path.size() > dir.size() && _wcsnicmp(path.c_str(), dir.c_str(), dir.size()) == 0
+        && (path[dir.size()] == L'\\' || path[dir.size()] == L'/');
+}
+
 // O audiodg roda como LOCAL SERVICE e não lê a pasta do usuário: a DLL
-// precisa ficar num lugar legível pelo sistema.
+// precisa ficar num lugar legível pelo sistema. Instalado (Program Files),
+// registra no lugar; em desenvolvimento, copia para Program Files.
 std::wstring deployDll()
 {
     const std::wstring src = moduleDir() + L"\\loudmixer_apo.dll";
-    const std::wstring dir = installDir();
-    const std::wstring dst = dir + L"\\loudmixer_apo.dll";
     if (GetFileAttributesW(src.c_str()) == INVALID_FILE_ATTRIBUTES)
         throw Failure{L"DLL do APO não encontrada ao lado da ferramenta: " + src};
-    if (!sameText(src, dst)) {
-        SHCreateDirectoryExW(nullptr, dir.c_str(), nullptr);
-        if (!CopyFileW(src.c_str(), dst.c_str(), FALSE))
-            throw Failure{L"copiar a DLL para " + dst + L": " + errorText(GetLastError())};
+    if (isUnder(src, programFilesDir())) {
+        say(L"  DLL: " + src);
+        return src;
     }
-    say(L"  DLL: " + dst);
+    const std::wstring dir = installDir();
+    const std::wstring dst = dir + L"\\loudmixer_apo.dll";
+    SHCreateDirectoryExW(nullptr, dir.c_str(), nullptr);
+    if (!CopyFileW(src.c_str(), dst.c_str(), FALSE))
+        throw Failure{L"copiar a DLL para " + dst + L": " + errorText(GetLastError())};
+    say(L"  DLL copiada para: " + dst);
     return dst;
+}
+
+std::wstring logDir()
+{
+    wchar_t dir[MAX_PATH];
+    if (!ExpandEnvironmentStringsW(L"%ProgramData%\\LoudMixer", dir, MAX_PATH))
+        return {};
+    return dir;
 }
 
 void registerCom(const std::wstring& dll)
@@ -549,9 +574,10 @@ void restoreValues(const std::wstring& guid)
 // usuários leem.
 void ensureLogDir()
 {
-    wchar_t dir[MAX_PATH];
-    if (!ExpandEnvironmentStringsW(L"%ProgramData%\\LoudMixer", dir, MAX_PATH))
+    const std::wstring d = logDir();
+    if (d.empty())
         return;
+    const wchar_t* dir = d.c_str();
     CreateDirectoryW(dir, nullptr);
     PSECURITY_DESCRIPTOR sd = nullptr;
     if (ConvertStringSecurityDescriptorToSecurityDescriptorW(
@@ -642,24 +668,170 @@ const Stage& stageByName(const std::wstring& name)
     throw Failure{L"estágio inválido: " + name + L" (use sfx, mfx ou efx)"};
 }
 
-int cmdInstall(const std::wstring& target, DWORD gainPercent, const std::wstring& stageName)
+// Toca silêncio no dispositivo e espera o APO processar algum bloco. É a
+// única forma de saber se o Windows montou o estágio escolhido (o EFX, por
+// exemplo, não é montado em alguns dispositivos Bluetooth).
+bool verifyProcessing(const Endpoint& ep, DWORD timeoutMs)
+{
+    Com<IMMDeviceEnumerator> en;
+    if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator),
+                                reinterpret_cast<void**>(en.put()))))
+        return false;
+    // Logo depois de reiniciar os serviços, os dispositivos demoram a voltar.
+    Com<IAudioClient> client;
+    for (int i = 0; i < 50 && !client.p; ++i) {
+        Com<IMMDevice> dev;
+        if (SUCCEEDED(en->GetDevice(ep.id.c_str(), dev.put())))
+            dev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, reinterpret_cast<void**>(client.put()));
+        if (!client.p)
+            Sleep(100);
+    }
+    if (!client.p)
+        return false;
+
+    WAVEFORMATEX* fmt = nullptr;
+    if (FAILED(client->GetMixFormat(&fmt)))
+        return false;
+    const WORD blockAlign = fmt->nBlockAlign;
+    const HRESULT hr = client->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, 2000000 /* 200 ms */, 0, fmt, nullptr);
+    CoTaskMemFree(fmt);
+    if (FAILED(hr))
+        return false;
+    UINT32 bufferFrames = 0;
+    Com<IAudioRenderClient> render;
+    if (FAILED(client->GetBufferSize(&bufferFrames))
+        || FAILED(client->GetService(__uuidof(IAudioRenderClient), reinterpret_cast<void**>(render.put()))))
+        return false;
+
+    auto feed = [&] {
+        UINT32 padding = 0;
+        if (FAILED(client->GetCurrentPadding(&padding)))
+            return;
+        const UINT32 free = bufferFrames - padding;
+        BYTE* data = nullptr;
+        if (free && SUCCEEDED(render->GetBuffer(free, &data))) {
+            std::memset(data, 0, static_cast<size_t>(free) * blockAlign); // silêncio "de verdade", não marcado
+            render->ReleaseBuffer(free, 0);
+        }
+    };
+    feed();
+    client->Start();
+    bool ok = false;
+    SharedView view;
+    const ULONGLONG deadline = GetTickCount64() + timeoutMs;
+    while (GetTickCount64() < deadline) {
+        Sleep(20);
+        feed();
+        if (!view && !view.open(ep.guid))
+            continue;
+        if (view.get()->lockedInstances.load() > 0 && view.get()->heartbeat.load() > 0) {
+            ok = true;
+            break;
+        }
+    }
+    client->Stop();
+    return ok;
+}
+
+std::wstring registeredDll()
+{
+    if (auto k = Key::tryOpen(HKEY_LOCAL_MACHINE, kClsidKey + L"\\InprocServer32", KEY_READ))
+        return k->string(L"").value_or(L"");
+    return {};
+}
+
+// Sem nenhum dispositivo com o APO: remove registro, DLL copiada, ajustes e log.
+// Chamar com os serviços de áudio parados (a DLL pode estar carregada).
+void cleanupIfUnused()
+{
+    if (!installedEndpoints().empty())
+        return;
+    const std::wstring dll = registeredDll();
+    unregisterCom();
+    if (!dll.empty() && isUnder(dll, installDir())) {
+        if (DeleteFileW(dll.c_str()) || GetLastError() == ERROR_FILE_NOT_FOUND) {
+            RemoveDirectoryW(installDir().c_str());
+            RemoveDirectoryW((programFilesDir() + L"\\LoudMixer").c_str()); // só se estiver vazia
+            say(L"  DLL removida");
+        } else {
+            MoveFileExW(dll.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT);
+            say(L"  DLL em uso: será removida no próximo boot");
+        }
+    }
+    RegDeleteTreeW(HKEY_LOCAL_MACHINE, kApoSettingsKey);
+    RegDeleteKeyW(HKEY_LOCAL_MACHINE, kApoSettingsKey);
+    RegDeleteKeyW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\LoudMixer"); // só se estiver vazia
+    const std::wstring logs = logDir();
+    if (!logs.empty()) {
+        DeleteFileW((logs + L"\\apo.log").c_str());
+        RemoveDirectoryW(logs.c_str());
+    }
+}
+
+void detachEndpoint(const std::wstring& guid)
+{
+    restoreValues(guid);
+    if (auto k = Key::tryOpen(HKEY_LOCAL_MACHINE, kApoSettingsKey, KEY_SET_VALUE))
+        k->remove(guid);
+}
+
+constexpr int kExitNoWorkingStage = 3;
+
+struct InstallOptions {
+    DWORD gainPercent = 100;
+    std::wstring stage = L"auto";
+    bool verify = true;
+    bool debugLog = false;
+};
+
+int cmdInstall(const std::wstring& target, const InstallOptions& opt)
 {
     requireAdmin();
-    const Stage& stage = stageByName(stageName);
+    std::vector<const Stage*> stages;
+    if (sameText(opt.stage, L"auto")) {
+        // EFX pega todos os modos de processamento; MFX e SFX são alternativas.
+        stages = {&stageByName(L"efx"), &stageByName(L"mfx"), &stageByName(L"sfx")};
+    } else {
+        stages = {&stageByName(opt.stage)};
+    }
     ComInit com;
     const Endpoint ep = resolveEndpoint(target);
     say(L"Instalando o APO em: " + ep.name + L" " + ep.guid);
     {
         AudioServicesStopped audio;
         const std::wstring dll = deployDll();
-        ensureLogDir();
         registerCom(dll);
-        attachToEndpoint(ep.guid, stage);
-        setInitialGain(ep.guid, gainPercent);
-        say(L"  ganho inicial: " + std::to_wstring(gainPercent) + L"%");
+        Key settings = Key::create(HKEY_LOCAL_MACHINE, kApoSettingsKey);
+        settings.setDword(kDebugLogValue, opt.debugLog ? 1 : 0);
+        if (opt.debugLog)
+            ensureLogDir();
+        setInitialGain(ep.guid, opt.gainPercent);
+        say(L"  ganho inicial: " + std::to_wstring(opt.gainPercent) + L"%");
+        attachToEndpoint(ep.guid, *stages[0]);
     }
-    say(L"OK. Toque algum som e rode 'status " + ep.guid + L"'.");
-    return 0;
+    if (!opt.verify) {
+        say(L"OK (sem verificação). Toque algum som e rode 'status " + ep.guid + L"'.");
+        return 0;
+    }
+    for (size_t i = 0; i < stages.size(); ++i) {
+        if (i > 0) {
+            AudioServicesStopped audio;
+            attachToEndpoint(ep.guid, *stages[i]);
+        }
+        say(L"  verificando o estágio " + std::wstring(stages[i]->name) + L"...");
+        if (verifyProcessing(ep, 4000)) {
+            say(L"OK. O APO está processando o áudio no estágio " + std::wstring(stages[i]->name) + L".");
+            return 0;
+        }
+        say(L"  o Windows não montou o APO no estágio " + std::wstring(stages[i]->name));
+    }
+    {
+        AudioServicesStopped audio;
+        detachEndpoint(ep.guid);
+        cleanupIfUnused();
+    }
+    say(L"ERRO: nenhum estágio funcionou neste dispositivo; ele foi restaurado como estava.");
+    return kExitNoWorkingStage;
 }
 
 int cmdUninstall(const std::wstring& target)
@@ -673,22 +845,9 @@ int cmdUninstall(const std::wstring& target)
         guids.push_back(resolveEndpoint(target).guid);
     {
         AudioServicesStopped audio;
-        for (const auto& g : guids) {
-            restoreValues(g);
-            if (auto k = Key::tryOpen(HKEY_LOCAL_MACHINE, kApoSettingsKey, KEY_SET_VALUE))
-                k->remove(g);
-        }
-        if (installedEndpoints().empty()) {
-            unregisterCom();
-            const std::wstring dll = installDir() + L"\\loudmixer_apo.dll";
-            if (DeleteFileW(dll.c_str()) || GetLastError() == ERROR_FILE_NOT_FOUND) {
-                RemoveDirectoryW(installDir().c_str());
-                say(L"  DLL removida");
-            } else {
-                MoveFileExW(dll.c_str(), nullptr, MOVEFILE_DELAY_UNTIL_REBOOT);
-                say(L"  DLL em uso: será removida no próximo boot");
-            }
-        }
+        for (const auto& g : guids)
+            detachEndpoint(g);
+        cleanupIfUnused();
     }
     say(L"OK. APO removido.");
     return 0;
@@ -776,7 +935,8 @@ int cmdSetGain(const std::wstring& target, DWORD percent)
 int usage()
 {
     say(L"uso: loudmixer-apo-setup list\n"
-        L"     loudmixer-apo-setup install   <dispositivo|default> [--gain 200] [--stage efx|mfx|sfx]\n"
+        L"     loudmixer-apo-setup install   <dispositivo|default> [--gain 100] [--stage auto|efx|mfx|sfx]\n"
+        L"                                    [--no-verify] [--debug-log]\n"
         L"     loudmixer-apo-setup uninstall <dispositivo|default|all>\n"
         L"     loudmixer-apo-setup status    <dispositivo|default>\n"
         L"     loudmixer-apo-setup set-gain  <dispositivo|default> <porcentagem>\n"
@@ -792,22 +952,24 @@ int main()
     int argc = 0;
     LPWSTR* argvW = CommandLineToArgvW(GetCommandLineW(), &argc);
     std::vector<std::wstring> args;
-    DWORD gain = 200;
-    std::wstring stage = L"efx";
+    InstallOptions opt;
     for (int i = 1; i < argc; ++i) {
         const std::wstring a = argvW[i];
         if (a == L"--log" && i + 1 < argc) {
             g_log = _wfopen(argvW[++i], L"ab");
         } else if (a == L"--stage" && i + 1 < argc) {
-            stage = argvW[++i];
+            opt.stage = argvW[++i];
+        } else if (a == L"--no-verify") {
+            opt.verify = false;
+        } else if (a == L"--debug-log") {
+            opt.debugLog = true;
         } else if (a == L"--gain" && i + 1 < argc) {
-            gain = static_cast<DWORD>(std::wcstoul(argvW[++i], nullptr, 10));
+            opt.gainPercent = std::min<DWORD>(static_cast<DWORD>(std::wcstoul(argvW[++i], nullptr, 10)), 200);
         } else {
             args.push_back(a);
         }
     }
     LocalFree(argvW);
-    gain = std::min<DWORD>(gain, 200);
 
     int rc = 2;
     try {
@@ -816,7 +978,7 @@ int main()
         else if (args[0] == L"list")
             rc = cmdList();
         else if (args[0] == L"install" && args.size() == 2)
-            rc = cmdInstall(args[1], gain, stage);
+            rc = cmdInstall(args[1], opt);
         else if (args[0] == L"uninstall" && args.size() == 2)
             rc = cmdUninstall(args[1]);
         else if (args[0] == L"status" && args.size() == 2)

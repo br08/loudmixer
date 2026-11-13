@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -389,4 +390,42 @@ TEST_F(ApoTest, SupportsComAggregationLikeAudiodg)
     rt->Release();
     EXPECT_EQ(outer.refs, 1u);
     EXPECT_EQ(inner->Release(), 0u); // o interno destrói o objeto
+}
+
+TEST_F(ApoTest, AppliesPerChannelGains)
+{
+    initWithEndpoint();
+    lock(2);
+    auto* s = shared_.get();
+    for (int c = 0; c < kSharedMaxChannels; ++c)
+        EXPECT_FLOAT_EQ(s->channelGains[c].load(), 1.0f); // neutro ao criar
+    s->channelGains[0].store(2.0f);
+    s->channelGains[1].store(0.5f);
+    std::vector<float> buf(2 * 128, 0.25f);
+    process(buf, 2);
+    for (size_t i = 0; i < buf.size(); i += 2) {
+        EXPECT_NEAR(buf[i], 0.5f, 1e-6f);
+        EXPECT_NEAR(buf[i + 1], 0.125f, 1e-6f);
+    }
+}
+
+// Risco #11: qualquer processo do usuário pode escrever na memória
+// compartilhada. Valores absurdos não podem gerar saída fora de [-1, 1].
+TEST_F(ApoTest, InvalidSharedValuesStayBounded)
+{
+    initWithEndpoint();
+    lock(2);
+    auto* s = shared_.get();
+    const float bad[] = {1e9f, -5.0f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()};
+    for (float g : bad) {
+        s->gain.store(g);
+        s->channelGains[0].store(g);
+        s->curve.store(12345);
+        std::vector<float> buf(2 * 128, 0.9f);
+        process(buf, 2);
+        for (float v : buf) {
+            EXPECT_TRUE(std::isfinite(v)) << "ganho " << g;
+            EXPECT_LE(std::fabs(v), 1.0f) << "ganho " << g;
+        }
+    }
 }

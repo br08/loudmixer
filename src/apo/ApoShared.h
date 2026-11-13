@@ -17,7 +17,9 @@
 namespace loudmixer::apo {
 
 constexpr std::uint32_t kSharedMagic = 0x4C4D4150; // "LMAP"
-constexpr std::uint32_t kSharedVersion = 1;
+// v2: ganho por canal. O APO e o app recusam versões diferentes da sua.
+constexpr std::uint32_t kSharedVersion = 2;
+constexpr int kSharedMaxChannels = 32;
 
 struct SharedState {
     std::atomic<std::uint32_t> magic;   // escrito por último: indica que o resto está pronto
@@ -33,6 +35,7 @@ struct SharedState {
     std::atomic<std::uint64_t> clippedSamples;
     std::atomic<float> peakIn;  // máximos desde a última leitura (o leitor zera)
     std::atomic<float> peakOut;
+    std::atomic<float> channelGains[kSharedMaxChannels]; // linear, 0..2 (1.0 = neutro)
 };
 
 static_assert(std::atomic<float>::is_always_lock_free);
@@ -41,6 +44,9 @@ static_assert(std::atomic<std::uint64_t>::is_always_lock_free);
 // Chave em HKLM com o ganho inicial por endpoint (DWORD, em %), lida pelo APO
 // ao criar a seção. Assim o boost vale mesmo antes de o app abrir.
 constexpr const wchar_t* kApoSettingsKey = L"SOFTWARE\\LoudMixer\\Apo";
+// DWORD em kApoSettingsKey: != 0 liga o log de diagnóstico do APO
+// (%ProgramData%\LoudMixer\apo.log). Desligado por padrão.
+constexpr const wchar_t* kDebugLogValue = L"DebugLog";
 
 inline std::wstring normalizeEndpointGuid(std::wstring guid)
 {
