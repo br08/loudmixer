@@ -1,0 +1,82 @@
+name: Release
+
+# Publica uma release no GitHub quando uma tag v* é enviada
+# (ex.: git tag v0.2.0 && git push origin v0.2.0). Push de código não dispara.
+# Passo a passo em docs/DESENVOLVIMENTO.md.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # Mesmos jobs da CI (compilação, testes e pacotes). Se algum falhar, nada
+    # é publicado.
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versão da tag
+        id: version
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
+          # A versão do CMake (project VERSION) dá nome aos pacotes; ela não
+          # inclui sufixos como -rc1.
+          base="${version%%-*}"
+          cmake_version=$(sed -nE 's/^[[:space:]]*VERSION[[:space:]]+([0-9.]+).*/\1/p' CMakeLists.txt | head -n1)
+          if [ "$base" != "$cmake_version" ]; then
+            echo "::error::A tag $tag não bate com a versão do CMakeLists.txt ($cmake_version)."
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$cmake_version" >> "$GITHUB_OUTPUT"
+          # Tag com sufixo (v0.2.0-rc1) vira pré-release.
+          if [ "$version" != "$base" ]; then
+            echo "prerelease=--prerelease" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Conferir pacotes e gerar checksums
+        working-directory: dist
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          for f in "loudmixer-$VERSION-win64.exe" "loudmixer-$VERSION-win64.zip" "loudmixer_${VERSION}_amd64.deb"; do
+            test -f "$f" || { echo "::error::Pacote ausente: $f"; ls -la; exit 1; }
+          done
+          sha256sum "loudmixer-$VERSION-win64.exe" "loudmixer-$VERSION-win64.zip" "loudmixer_${VERSION}_amd64.deb" > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Publicar release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          notes=$(sed "s/{{VERSION}}/$VERSION/g" .github/release-notes.md)
+          # As notas fixas vêm antes das geradas a partir dos PRs/commits.
+          gh release create "$TAG" \
+            --verify-tag \
+            --title "LoudMixer ${TAG#v}" \
+            --notes "$notes" \
+            --generate-notes \
+            $PRERELEASE \
+            "dist/loudmixer-$VERSION-win64.exe" \
+            "dist/loudmixer-$VERSION-win64.zip" \
+            "dist/loudmixer_${VERSION}_amd64.deb" \
+            dist/SHA256SUMS.txt
