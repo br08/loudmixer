@@ -118,7 +118,7 @@ medição) à mistura dos apps:
 - O ganho fica salvo e o APO o reaplica quando o Windows o recria (reboot,
   reconexão), mesmo com o app fechado.
 
-O APO é ativado por dispositivo no próprio app (botão **Boost 200%**, com
+O APO é ativado por dispositivo no próprio app (botão **Ligar boost**, com
 permissão de administrador). Onde ele não funciona, há a alternativa do **cabo
 virtual** (VB-Audio Cable), em *Configurações > Avançado*: os apps
 tocam no cabo, o LoudMixer captura em loopback, aplica o DSP e reinjeta no

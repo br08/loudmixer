@@ -112,13 +112,13 @@ de efeitos do dispositivo e que aplica o ganho, com soft-clip, à mistura dos
 apps. Com o APO num dispositivo, os sliders do dispositivo, dos canais e dos
 apps que tocam nele vão até 200%, sem cabo virtual e sem trocar a saída padrão.
 
-No LoudMixer, aba **Dispositivos**, o botão **Boost 200%** de cada dispositivo
+No LoudMixer, aba **Dispositivos**, o botão **Ligar boost** de cada dispositivo
 ativa o APO (o Windows pede permissão de administrador). O mesmo botão mostra o
 estado e desativa o boost:
 
 | Botão | Significado |
 |---|---|
-| **Boost 200%** | disponível; clique para ativar |
+| **Ligar boost** | disponível; clique para ativar |
 | **Boost ligado** | ativo; clique para desativar |
 | **Boost pausado** | os aprimoramentos de áudio do dispositivo foram desligados nas configurações do Windows; clique para religar |
 | **Boost removido** | uma atualização de driver ou do Windows tirou o APO do dispositivo; clique para religar |

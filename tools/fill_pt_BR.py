@@ -135,10 +135,10 @@ PT_BR = {
     'No virtual output device found. Install VB-Audio Virtual Cable (free), set "CABLE Input" as the Windows default output and enable DSP boost again.':
         'Nenhum dispositivo de saída virtual encontrado. Instale o VB-Audio Virtual Cable (gratuito), defina "CABLE Input" como saída padrão do Windows e ative o Boost DSP novamente.',
     "This audio backend does not support DSP processing.": "Este backend de áudio não suporta processamento DSP.",
-    ' — click “Boost 200%” on a device to go above 100%':
-        ' — clique em “Boost 200%” num dispositivo para passar de 100%',
-    'Boost 200%':
-        'Boost 200%',
+    ' — click “Turn on boost” on a device to go above 100%':
+        ' — clique em “Ligar boost” num dispositivo para passar de 100%',
+    'Turn on boost':
+        'Ligar boost',
     'Let this device, its channels and its apps go up to 200% (asks for administrator permission)':
         'Deixa este dispositivo, os canais e os apps dele irem até 200% (pede permissão de administrador)',
     'Boost on':
@@ -185,8 +185,8 @@ PT_BR = {
         'Avançado',
     'Show the virtual cable route (“DSP boost”) on devices':
         'Mostrar a rota por cabo virtual (“Boost DSP”) nos dispositivos',
-    'Alternative way to go above 100% for devices where “Boost 200%” does not work. Needs a virtual audio cable (e.g. VB-Audio Cable) set as the Windows default output.':
-        'Outro jeito de passar de 100% em dispositivos onde o “Boost 200%” não funciona. Precisa de um cabo de áudio virtual (ex.: VB-Audio Cable) como saída padrão do Windows.',
+    'Alternative way to go above 100% for devices where the boost button does not work. Needs a virtual audio cable (e.g. VB-Audio Cable) set as the Windows default output.':
+        'Outro jeito de passar de 100% em dispositivos onde o botão de boost não funciona. Precisa de um cabo de áudio virtual (ex.: VB-Audio Cable) como saída padrão do Windows.',
     'Audio enhancements were turned off for it in the Windows settings.':
         'Os aprimoramentos de áudio dele foram desligados nas configurações do Windows.',
     'A driver or Windows update removed it.':

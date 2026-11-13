@@ -49,7 +49,7 @@ SettingsDialog::SettingsDialog(AutoStartService* autostart, QWidget* parent)
     auto* advanced = new QGroupBox(tr("Advanced"), this);
     auto* advancedForm = new QFormLayout(advanced);
     showCableRoute_ = new QCheckBox(tr("Show the virtual cable route (“DSP boost”) on devices"), this);
-    showCableRoute_->setToolTip(tr("Alternative way to go above 100% for devices where “Boost 200%” does not work. "
+    showCableRoute_->setToolTip(tr("Alternative way to go above 100% for devices where the boost button does not work. "
                                    "Needs a virtual audio cable (e.g. VB-Audio Cable) set as the Windows default output."));
     showCableRoute_->setChecked(s.value(keys::showCableRoute, false).toBool());
     advancedForm->addRow(showCableRoute_);

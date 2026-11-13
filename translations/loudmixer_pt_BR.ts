@@ -274,12 +274,12 @@ Dispositivo de saída padrão</translation>
         <translation>Excluir o preset “%1”?</translation>
     </message>
     <message>
-        <source> — click “Boost 200%” on a device to go above 100%</source>
-        <translation> — clique em “Boost 200%” num dispositivo para passar de 100%</translation>
+        <source> — click “Turn on boost” on a device to go above 100%</source>
+        <translation> — clique em “Ligar boost” num dispositivo para passar de 100%</translation>
     </message>
     <message>
-        <source>Boost 200%</source>
-        <translation>Boost 200%</translation>
+        <source>Turn on boost</source>
+        <translation>Ligar boost</translation>
     </message>
     <message>
         <source>Let this device, its channels and its apps go up to 200% (asks for administrator permission)</source>
@@ -483,8 +483,8 @@ Como alternativa, a rota por cabo virtual pode ser ligada em Configurações &gt
         <translation>Mostrar a rota por cabo virtual (“Boost DSP”) nos dispositivos</translation>
     </message>
     <message>
-        <source>Alternative way to go above 100% for devices where “Boost 200%” does not work. Needs a virtual audio cable (e.g. VB-Audio Cable) set as the Windows default output.</source>
-        <translation>Outro jeito de passar de 100% em dispositivos onde o “Boost 200%” não funciona. Precisa de um cabo de áudio virtual (ex.: VB-Audio Cable) como saída padrão do Windows.</translation>
+        <source>Alternative way to go above 100% for devices where the boost button does not work. Needs a virtual audio cable (e.g. VB-Audio Cable) set as the Windows default output.</source>
+        <translation>Outro jeito de passar de 100% em dispositivos onde o botão de boost não funciona. Precisa de um cabo de áudio virtual (ex.: VB-Audio Cable) como saída padrão do Windows.</translation>
     </message>
 </context>
 <context>

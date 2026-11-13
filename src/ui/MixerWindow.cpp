@@ -307,7 +307,7 @@ void MixerWindow::syncDevices()
     if (const auto def = manager_->device(manager_->defaultDeviceId());
         def && manager_->maxGain(Target::device(def->id)) <= 1.0) {
         if (def->systemBoostState != SystemBoostState::Unsupported)
-            status += tr(" — click “Boost 200%” on a device to go above 100%");
+            status += tr(" — click “Turn on boost” on a device to go above 100%");
         else if (showCableRoute())
             status += tr(" — enable “DSP boost” on a device to go above 100%");
     }
@@ -348,7 +348,7 @@ void MixerWindow::updateSystemBoostButton(QToolButton* button, const AudioDevice
         return;
     case SystemBoostState::Off:
         button->setIcon(shield);
-        button->setText(tr("Boost 200%"));
+        button->setText(tr("Turn on boost"));
         button->setToolTip(tr("Let this device, its channels and its apps go up to 200% "
                               "(asks for administrator permission)"));
         break;
