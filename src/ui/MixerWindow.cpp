@@ -1,6 +1,7 @@
 #include "MixerWindow.h"
 
 #include "AppIcons.h"
+#include "BuildInfo.h"
 #include "ChannelsPanel.h"
 #include "GainSlider.h"
 #include "SettingsDialog.h"
@@ -50,7 +51,7 @@ MixerWindow::MixerWindow(AudioSessionManager* manager, PresetStore* presets, Aut
     , presets_(presets)
     , autostart_(autostart)
 {
-    setWindowTitle(QStringLiteral("LoudMixer"));
+    setWindowTitle(appDisplayName());
     setWindowIcon(appIcon());
     clock_.start();
 

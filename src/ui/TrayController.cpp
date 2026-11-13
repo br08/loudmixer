@@ -1,6 +1,7 @@
 #include "TrayController.h"
 
 #include "AppIcons.h"
+#include "BuildInfo.h"
 #include "MixerWindow.h"
 #include "core/AudioSessionManager.h"
 #include "core/AutoStartService.h"
@@ -85,7 +86,7 @@ void TrayController::updateState()
 {
     const auto dev = manager_->device(manager_->defaultDeviceId());
     TrayState state = TrayState::Normal;
-    QString tip = QStringLiteral("LoudMixer");
+    QString tip = appDisplayName();
     if (dev) {
         if (dev->muted)
             state = TrayState::Muted;

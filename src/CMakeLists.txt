@@ -112,6 +112,7 @@ qt_add_executable(loudmixer WIN32
     main.cpp
     ui/AppIcons.cpp
     ui/AppIcons.h
+    ui/BuildInfo.h
     ui/ChannelsPanel.cpp
     ui/ChannelsPanel.h
     ui/GainSlider.cpp
@@ -129,7 +130,8 @@ qt_add_executable(loudmixer WIN32
     ${PROJECT_SOURCE_DIR}/resources/loudmixer.qrc
 )
 set_target_properties(loudmixer PROPERTIES AUTOMOC ON AUTORCC ON OUTPUT_NAME loudmixer)
-target_compile_definitions(loudmixer PRIVATE LOUDMIXER_VERSION="${PROJECT_VERSION}")
+target_compile_definitions(loudmixer PRIVATE LOUDMIXER_VERSION="${PROJECT_VERSION}"
+    $<$<CONFIG:Debug>:LOUDMIXER_DEV_BUILD>) # "(dev)" no título e na bandeja
 target_link_libraries(loudmixer PRIVATE loudmixer_core Qt6::Gui Qt6::Widgets Qt6::Network)
 if(WIN32)
     target_sources(loudmixer PRIVATE ${PROJECT_SOURCE_DIR}/resources/loudmixer.rc)
