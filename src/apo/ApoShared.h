@@ -41,8 +41,9 @@ struct SharedState {
 static_assert(std::atomic<float>::is_always_lock_free);
 static_assert(std::atomic<std::uint64_t>::is_always_lock_free);
 
-// Chave em HKLM com o ganho inicial por endpoint (DWORD, em %), lida pelo APO
-// ao criar a seção. Assim o boost vale mesmo antes de o app abrir.
+// Chave em HKLM com o estado salvo por endpoint (ganho mestre, canais; layout
+// em ApoRegistry.h), lido pelo APO ao criar a seção. Assim o boost vale mesmo
+// antes de o app abrir.
 constexpr const wchar_t* kApoSettingsKey = L"SOFTWARE\\LoudMixer\\Apo";
 // DWORD em kApoSettingsKey: != 0 liga o log de diagnóstico do APO
 // (%ProgramData%\LoudMixer\apo.log). Desligado por padrão.

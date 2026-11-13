@@ -31,7 +31,9 @@ Ninja), o mesmo usado no CI.
    "WSL"). Se o código estiver no WSL, abra pelo caminho
    `\\wsl.localhost\<distro>\caminho\do\loudmixer`. Se o VS Code avisar sobre
    host UNC, permita `wsl.localhost`. Se sugerir "Reabrir no WSL", ignore:
-   essa opção compila a versão Linux.
+   essa opção compila a versão Linux. Com a extensão WSL instalada, o VS Code
+   pode reabrir a pasta no WSL sozinho; nesse caso, use o caminho
+   [A partir do WSL](#a-partir-do-wsl).
 2. Na barra de status, escolha o preset **Windows (MinGW) · Debug** (ou
    Ctrl+Shift+P → *CMake: Select Configure Preset*).
 3. **F7** compila. *CMake: Run Tests* roda os testes. **F5** depura o app
@@ -72,6 +74,9 @@ No VS Code, as mesmas ações estão em *Terminal > Run Task*: **Windows: rodar
 tem depurador; para depurar com o gdb, use a janela local descrita acima.
 
 ## 3. Instalador
+
+Depois de compilar o preset `windows-release` (o `cpack` usa a configuração e
+os binários do último build):
 
 ```powershell
 cd $env:LOCALAPPDATA\loudmixer-build\windows-release
@@ -121,14 +126,21 @@ estado e desativa o boost:
 Quando o boost cai por fora, o LoudMixer também avisa com uma notificação.
 
 O botão usa a ferramenta `loudmixer-apo-setup`, que fica ao lado do
-`loudmixer.exe` e também pode ser usada direto, como administrador:
+`loudmixer.exe` e também pode ser usada direto. `install` e `uninstall`
+precisam de um terminal aberto como administrador (a ferramenta não pede
+elevação sozinha); os outros comandos, não.
 
 ```powershell
-loudmixer-apo-setup list              # dispositivos e estado do APO
-loudmixer-apo-setup install default   # ativa no dispositivo padrão (pede UAC)
-loudmixer-apo-setup status default    # o áudio está passando pelo APO?
-loudmixer-apo-setup uninstall all     # remove e restaura os dispositivos
+loudmixer-apo-setup list                 # dispositivos e estado do APO
+loudmixer-apo-setup install default      # ativa no dispositivo padrão (admin)
+loudmixer-apo-setup status default       # o áudio está passando pelo APO?
+loudmixer-apo-setup set-gain default 150 # muda o ganho do APO na hora
+loudmixer-apo-setup uninstall all        # remove e restaura os dispositivos (admin)
 ```
+
+Opções do `install`: `--stage auto|efx|mfx|sfx` (padrão `auto`), `--gain <%>`
+(ganho inicial, padrão 100), `--no-verify` e `--debug-log` (log do APO em
+`%ProgramData%\LoudMixer\apo.log`). Todos os comandos aceitam `--log <arquivo>`.
 
 - O `install` liga os **aprimoramentos de áudio** do dispositivo (o Windows só
   roda APOs assim). Isso também ativa os efeitos do fabricante, se houver.

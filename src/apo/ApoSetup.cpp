@@ -2,11 +2,15 @@
 // saída e mostra o estado dele.
 //
 //   loudmixer-apo-setup list
-//   loudmixer-apo-setup install   <endpoint|default> [--gain 200]   (admin)
-//   loudmixer-apo-setup uninstall <endpoint|default|all>             (admin)
+//   loudmixer-apo-setup install   <endpoint|default> [--gain 100] [--stage auto|efx|mfx|sfx]
+//                                 [--no-verify] [--debug-log]          (admin)
+//   loudmixer-apo-setup uninstall <endpoint|default|all>               (admin)
 //   loudmixer-apo-setup status    <endpoint|default>
 //   loudmixer-apo-setup set-gain  <endpoint|default> <percent>
 //   ... [--log arquivo]   (útil quando roda elevado, sem console visível)
+//
+// Saída: 0 = ok, 1 = erro, 2 = uso inválido, 3 = nenhum estágio da cadeia
+// funcionou no dispositivo (install; o dispositivo é restaurado).
 //
 // O install guarda os valores originais de FxProperties em
 // HKLM\SOFTWARE\LoudMixer\Apo\Backup\{guid}; o uninstall os restaura

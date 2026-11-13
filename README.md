@@ -16,18 +16,22 @@ README descreve o que foi implementado, como compilar e o que ainda falta.
 |---|---|
 | **0 — Fundação** | ✅ CMake multiplataforma, `IAudioBackend`, `MockBackend`, `GainProcessor` + testes, esqueleto Qt com bandeja |
 | **1 — Linux MVP** | ✅ App / dispositivo / canal até 200%, rota de boost DSP com soft-clip, hot-plug, reconexão. Script de AppImage (não executado aqui) |
-| **2 — Windows MVP** | ✅ WASAPI (sessões, dispositivo, canais) compilado e testado no Windows real; instalador NSIS gerado. Boost > 100% por efeito de sistema (APO) próprio, testado no Windows real; cabo virtual como alternativa |
+| **2 — Windows MVP** | ✅ WASAPI (sessões, dispositivo, canais) compilado e testado no Windows real; instalador NSIS testado (instalação, atualização e desinstalação). Boost > 100% por efeito de sistema (APO) próprio, testado no Windows real; cabo virtual como alternativa |
 | **3 — UX** | ✅ Presets, auto-start, LED de clipping, atalhos, i18n PT-BR + EN |
 | **4 — Estabilidade** | ✅ Testes com ASan/UBSan/TSan, hot-plug no mock, encerramento limpo. ⚠️ Suspender/hibernar não testado |
 
 ### O que foi verificado de verdade
 
-- **DSP (`GainProcessor`)**: 20 testes unitários (transparência em 100%,
+- **DSP (`GainProcessor`)**: testes unitários de transparência em 100%,
   linearidade abaixo do joelho, saída nunca acima de ±1.0, curvas monotônicas
-  e contínuas, rampa sem "zipper", NaN, multicanal, medição, concorrência).
+  e contínuas, rampa sem "zipper", NaN, multicanal, medição e concorrência.
   Limpo sob ASan, UBSan e TSan.
 - **Núcleo Qt** (`AudioSessionManager`, `PresetStore`, `AutoStartService`):
-  14 testes com o `MockBackend`.
+  testes com o `MockBackend`, incluindo o boost do sistema simulado (medição
+  do LED, pedido assíncrono e aviso de boost perdido). O teste do auto-start
+  roda só no Linux.
+- **Divisão de ganho da rota APO** (`ApoRouteMath`): testes nas duas
+  plataformas.
 - **Backend Pulse contra um servidor real** (PulseAudio do WSLg): ganho de
   dispositivo > 100%, por canal, mute, detecção de um app novo e boost dele a
   200%, e a rota DSP processando áudio de verdade (≈43 mil amostras,
@@ -37,7 +41,8 @@ README descreve o que foi implementado, como compilar e o que ainda falta.
   instância única e comandos (`--volume-up`, `--quit`…) funcionando, UI
   renderizada e conferida nas três abas, em inglês e português.
 - **Windows (MSYS2 UCRT64: GCC 16, Qt 6.12)**: o app inteiro compila com
-  `-Werror`, os 33 testes passam, e o app roda no Windows real. Instância
+  `-Werror`, todos os testes passam (incluindo os do APO, que carregam a DLL
+  real), e o app roda no Windows real. Instância
   única e `--quit` funcionam, e `--volume-down` / `--volume-up` mudaram de
   fato o volume do dispositivo padrão (63% → 58% → 63%). O instalador NSIS e
   o ZIP são gerados, e a versão instalada roda sem o MSYS2 no PATH.
@@ -52,22 +57,24 @@ README descreve o que foi implementado, como compilar e o que ainda falta.
   configurações do Windows, com notificação; o app continua funcionando
   depois de cada reinício dos serviços de áudio. Conferido visualmente: slider
   até 200%, LED ativo e opção do cabo virtual escondida.
+- **Instalador NSIS no Windows real**: instalação por cima de uma versão
+  anterior (pelo assistente e em modo silencioso), APO registrado a partir de
+  `Program Files`, atualização com o boost ligado (o DLL em uso é trocado e o
+  boost continua ativo) e desinstalação restaurando os dispositivos, sem
+  sobras em arquivos ou no registro.
 - **Cabo virtual** (VB-Audio Cable): testado manualmente no Windows real.
 
 ### O que NÃO foi verificado
 
 - Build com **MSVC** (o toolchain do Windows é o MinGW do MSYS2).
-- O instalador NSIS foi gerado, mas não executado.
 - O CI (`.github/workflows/ci.yml`) ainda não rodou no GitHub.
 - **APO** num alto-falante com efeitos do fabricante no estágio EFX (só foi
   testado num fone Bluetooth, onde ele roda no estágio MFX), em DAC USB e HDMI,
   e com conteúdo protegido por DRM.
-- Registro do APO a partir da pasta de instalação (`Program Files`), que só o
-  instalador exercita.
 - **Backend PipeWire nativo**: compila, mas o ambiente de desenvolvimento não
   tinha daemon PipeWire. Só o caminho de erro foi testado.
 - Reconexão automática do Pulse após o servidor reiniciar.
-- Geração de AppImage, Flatpak e instalador NSIS (scripts prontos, não executados).
+- Geração de AppImage e Flatpak (scripts prontos, não executados).
 - Suspender/hibernar.
 
 ---
@@ -149,7 +156,7 @@ ctest --preset linux-release
 ./build-linux-release/src/loudmixer
 ```
 
-Pacotes: `cd build && cpack -G DEB` · AppImage: `packaging/linux/build-appimage.sh`
+Pacotes: `cd build-linux-release && cpack -G DEB` · AppImage: `packaging/linux/build-appimage.sh`
 · Flatpak: `packaging/linux/flatpak/org.loudmixer.LoudMixer.yml`.
 
 ### Windows
@@ -162,6 +169,8 @@ Usa o **MSYS2 UCRT64** (GCC + Qt 6 + CMake + Ninja). Resumo:
 3. Abra a pasta do projeto numa janela **local** do VS Code (se o código
    estiver no WSL: `\\wsl.localhost\<distro>\...`), escolha o preset
    **Windows (MinGW) · Debug** e aperte **F7**. **F5** depura.
+4. Com o código no WSL, `tools/windows-dev.sh` compila a versão Windows e a
+   abre a partir do terminal do WSL (sem depurador).
 
 Passo a passo, instalador NSIS e detalhes em
 [packaging/windows/README.md](packaging/windows/README.md).
@@ -189,7 +198,7 @@ Passo a passo, instalador NSIS e detalhes em
 ### Linha de comando e atalhos
 
 ```
-loudmixer [--minimized] [--backend auto|pulse|pipewire|mock]
+loudmixer [--minimized] [--backend auto|pulse|pipewire|wasapi|mock]
 loudmixer --volume-up | --volume-down | --mute | --mute-all | --toggle | --quit
 ```
 
@@ -204,11 +213,16 @@ Os comandos da segunda linha são enviados à instância que já está rodando.
 ### Testes
 
 ```bash
-ctest --test-dir build --output-on-failure            # unitários
-LOUDMIXER_LIVE_TESTS=1 ./build/tests/PulseBackendLiveTest   # contra o servidor real*
+ctest --preset linux-release                                            # unitários (Linux)
+LOUDMIXER_LIVE_TESTS=1 ./build-linux-release/tests/PulseBackendLiveTest   # contra o servidor real*
+tools/windows-dev.sh test                                               # unitários (Windows, a partir do WSL)
 ```
-\*Altera volumes temporariamente e os restaura no final. Silencia o
-dispositivo durante o teste de boost para não tocar um bipe alto.
+No Windows, o `WasapiApoLiveTest` (também com `LOUDMIXER_LIVE_TESTS=1`) testa a
+rota APO contra o áudio real; precisa do APO ligado num dispositivo.
+
+\*Os testes contra o áudio real alteram volumes por alguns segundos e os
+restauram no final. O do Pulse silencia o dispositivo durante o teste de boost
+para não tocar um bipe alto.
 
 ---
 
@@ -224,7 +238,7 @@ dispositivo durante o teste de boost para não tocar um bipe alto.
 | Cabo virtual na v1, APO assinado na v2 | **APO próprio** (não assinado) já agora; cabo virtual como alternativa | O Windows carrega o APO sem assinatura; boost sem programa de terceiros nem troca da saída padrão |
 | Qt 6.5+ | Qt **6.4+** | Debian 12 traz 6.4.2; nenhuma API usada exige 6.5 |
 | `MixerWindow.ui` / QML | Qt Widgets em código | As linhas são dinâmicas (apps aparecem/somem); o slider é desenhado à mão |
-| Soft-clip em todo boost | Soft-clip só na **rota DSP** | O ganho nativo do Pulse/PipeWire > 100% é aplicado no servidor, fora do nosso alcance |
+| Soft-clip em todo boost | Windows: sempre (no APO ou na rota do cabo). Linux: só na **rota DSP** | O ganho nativo do Pulse/PipeWire > 100% é aplicado no servidor, fora do nosso alcance |
 
 ## Limitações conhecidas / próximos passos
 
@@ -255,9 +269,10 @@ src/backend/linux/   PulseBackend, PulseBoostRoute, PipeWireBackend
 src/backend/windows/ WasapiBackend, ApoRouteMath.h, SessionEnumerator, LoopbackCapture, ComUtil.h
 src/apo/             APO (loudmixer_apo.dll), loudmixer-apo-setup, interfaces e estado compartilhado
 src/backend/mock/    MockBackend
-src/ui/              TrayController, MixerWindow, ChannelsPanel, GainSlider, SettingsDialog, SingleInstance, GlobalHotkeys, AppIcons
+src/ui/              TrayController, MixerWindow, ChannelsPanel, GainSlider, SettingsDialog, SingleInstance, GlobalHotkeys, AppIcons, BuildInfo.h
 tests/               GainProcessorTest, MockBackendTest, ApoRouteMathTest, PulseBackendLiveTest; no Windows: ApoTest, WasapiApoLiveTest
 translations/        loudmixer_pt_BR.ts  (tools/fill_pt_BR.py aplica as traduções)
 resources/           ícones (tools/make_icons.py gera .ico/.png), .qrc, .rc
+tools/               windows-dev.sh (versão Windows a partir do WSL), fill_pt_BR.py, make_icons.py
 packaging/           linux/ (AppImage, .desktop, Flatpak) · windows/ (NSIS via CPack)
 ```

@@ -1,9 +1,10 @@
-// APO de sistema (EFX: efeito de endpoint, depois da mistura) do LoudMixer.
+// APO de sistema do LoudMixer.
 //
-// Roda dentro do audiodg.exe. Aplica o GainProcessor (ganho até +6 dB com
-// soft-clip) ao áudio final do dispositivo. O ganho vem da memória
-// compartilhada (ApoShared.h), escrita pelo app; o valor inicial vem de
-// HKLM\SOFTWARE\LoudMixer\Apo\{guid-do-endpoint} (DWORD, em %).
+// Roda dentro do audiodg.exe, no estágio da cadeia de efeitos escolhido pelo
+// loudmixer-apo-setup (EFX, MFX ou SFX, o primeiro que o Windows montar no
+// dispositivo). Aplica o GainProcessor (ganho até +6 dB com soft-clip) ao
+// áudio. O ganho vem da memória compartilhada (ApoShared.h), escrita pelo app;
+// os valores iniciais (mestre e canais) vêm do registro (ApoRegistry.h).
 //
 // Regras de tempo real em APOProcess: sem locks, sem alocação, sem chamadas
 // ao sistema. Tudo que pode falhar acontece em Initialize/LockForProcess.
